@@ -161,7 +161,8 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
                 <div class="card-meta">
                     ${media.year ? `<span>${escapeHTML(media.year)}</span>` : ''}
                     ${media.genre ? `<span>${escapeHTML(media.genre.split(',')[0])}</span>` : ''}
-                    ${media.rating ? `<span>⭐ ${media.rating}/5</span>` : (media.globalRating ? `<span>⭐ ${escapeHTML(media.globalRating)}</span>` : '')}
+                    ${media.rating ? `<span title="Your Rating">⭐ ${media.rating}/5</span>` : ''}
+                    ${media.globalRating ? `<span title="Global Rating">🌐 ${escapeHTML(media.globalRating)}</span>` : ''}
                 </div>
                 ${progressHTML}
                 ${tagsHTML}
@@ -377,4 +378,40 @@ export function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+export function renderConfirmModal(title, text, confirmText, onConfirm) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay hidden';
+    modal.innerHTML = `
+        <div class="modal-card narrow">
+            <div class="modal-header">
+                <div class="modal-title">${escapeHTML(title)}</div>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 14px; color: var(--text-dim); line-height: 1.6;">${escapeHTML(text)}</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary confirm-cancel">Cancel</button>
+                <button class="btn btn-primary confirm-action" style="background:var(--danger); box-shadow: 0 4px 20px rgba(255,71,87,0.35);">${escapeHTML(confirmText)}</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Animate in
+    setTimeout(() => modal.classList.remove('hidden'), 10);
+    
+    const close = () => {
+        modal.classList.add('hidden');
+        setTimeout(() => modal.remove(), 250);
+    };
+    
+    modal.querySelector('.confirm-cancel').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    modal.querySelector('.confirm-action').addEventListener('click', () => {
+        onConfirm();
+        close();
+    });
 }

@@ -70,7 +70,7 @@ async function fetchDeepDetails(item) {
     }
     
     if (attempts === 3) {
-        ui.showToast(`Failed to fetch latest season data for ${item.title}`, 'error');
+        showToast(`Failed to fetch latest season data for ${item.title}`, 'error');
     }
     
     if ((item.category === 'series' || item.category === 'anime-series') && seasons.length === 0) {
@@ -165,7 +165,7 @@ async function handleRunSync() {
     try {
         let completed = 0;
         const total = state.library.length;
-        ui.showLoading('Running sync…', `Checking latest status of your tracked titles (0/${total})`);
+        showLoading('Running sync…', `Checking latest status of your tracked titles (0/${total})`);
         const res = await runSync(state.library, state.config, () => {
             completed++;
             document.getElementById('loading-sub').textContent = `Checking latest status of your tracked titles (${completed}/${total})`;
@@ -179,14 +179,14 @@ async function handleRunSync() {
         lib.saveSyncResults(state.syncResults);
         lib.saveSyncMeta(syncMeta);
         
-        ui.hideLoading();
-        ui.showToast(`Sync complete! (via ${getLastProvider()})`, 'success');
+        hideLoading();
+        showToast(`Sync complete! (via ${getLastProvider()})`, 'success');
         
         renderSyncScreen(state.library, state.syncResults);
         render();
     } catch (err) {
-        ui.hideLoading();
-        ui.showToast('Sync failed: ' + err.message, 'error');
+        hideLoading();
+        showToast('Sync failed: ' + err.message, 'error');
     }
 }
 
@@ -194,10 +194,10 @@ async function handleRunSync() {
 let allRecosLoaded = [];
 async function handleFetchRecos(append = false) {
     try {
-        ui.showLoading(append ? 'Loading more...' : 'Finding recommendations…', 'AI is analysing your taste profile');
+        showLoading(append ? 'Loading more...' : 'Finding recommendations…', 'AI is analysing your taste profile');
         const timeout = setTimeout(() => {
-            ui.hideLoading();
-            ui.showToast('Recommendations took too long', 'error');
+            hideLoading();
+            showToast('Recommendations took too long', 'error');
         }, 30000); // 30s safety timeout for slow LLMs
         
         const excludeTitles = append ? allRecosLoaded.map(r => r.title) : [];
@@ -210,15 +210,15 @@ async function handleFetchRecos(append = false) {
         }
         
         clearTimeout(timeout);
-        ui.hideLoading();
-        ui.showToast(`Found recos! (via ${getLastProvider()})`, 'success');
+        hideLoading();
+        showToast(`Found recos! (via ${getLastProvider()})`, 'success');
         
         renderRecommendations(allRecosLoaded, state.library, async (item) => {
-            ui.showLoading('Fetching details...');
-            const detailTimeout = setTimeout(() => ui.hideLoading(), 10000);
+            showLoading('Fetching details...');
+            const detailTimeout = setTimeout(() => hideLoading(), 10000);
             const seasons = await fetchDeepDetails(item);
             clearTimeout(detailTimeout);
-            ui.hideLoading();
+            hideLoading();
             
             const previewItem = {
                 ...item,
@@ -237,8 +237,8 @@ async function handleFetchRecos(append = false) {
         
         document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
     } catch (err) {
-        ui.hideLoading();
-        ui.showToast('Recommendations failed: ' + err.message, 'error');
+        hideLoading();
+        showToast('Recommendations failed: ' + err.message, 'error');
     }
 }
 
@@ -299,7 +299,7 @@ function bindEvents() {
     document.getElementById('random-picker-btn').addEventListener('click', () => {
         const pool = state.library.filter(m => m.status === 'plan-to-watch' || m.status === 'on-hold');
         if (pool.length === 0) {
-            ui.showToast("Your Plan to Watch list is empty!", "info");
+            showToast("Your Plan to Watch list is empty!", "info");
             return;
         }
         const randomItem = pool[Math.floor(Math.random() * pool.length)];
@@ -350,12 +350,12 @@ function bindEvents() {
     document.getElementById('add-confirm-btn').addEventListener('click', () => {
         const title = document.getElementById('add-title').value.trim();
         const category = document.getElementById('add-category').value;
-        if (!title || !category) { ui.showToast('Fill in title and category', 'error'); return; }
+        if (!title || !category) { showToast('Fill in title and category', 'error'); return; }
         
         const normTitle = lib.normalizeTitle(title);
         const isDuplicate = state.library.some(m => lib.normalizeTitle(m.title) === normTitle && m.category === category);
         if (isDuplicate) {
-            ui.showToast(`"${title}" is already in your vault!`, 'error');
+            showToast(`"${title}" is already in your vault!`, 'error');
             return;
         }
 
@@ -368,7 +368,7 @@ function bindEvents() {
         
         ui.closeModal('add-modal');
         render();
-        ui.showToast(`"${title}" added ✓`, 'success');
+        showToast(`"${title}" added ✓`, 'success');
         ['add-title','add-year','add-genre'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('add-category').value = '';
         document.getElementById('add-status').value = 'plan-to-watch';
@@ -437,12 +437,12 @@ function bindEvents() {
             state.previewItem = null;
             ui.closeModal('detail-modal');
             render();
-            ui.showToast('Added to vault ✓', 'success');
+            showToast('Added to vault ✓', 'success');
         } else {
             if (lib.updateMedia(state.library, data.id, data)) {
                 ui.closeModal('detail-modal');
                 render();
-                ui.showToast('Saved ✓', 'success');
+                showToast('Saved ✓', 'success');
             }
         }
     });
@@ -462,10 +462,10 @@ function bindEvents() {
         ui.closeModal('detail-modal');
         render();
         
-        ui.showToast(`Removed "${media.title}"`, 'info', 'Undo', () => {
+        showToast(`Removed "${media.title}"`, 'info', 'Undo', () => {
             lib.addMedia(state.library, clonedMedia);
             render();
-            ui.showToast(`Restored "${media.title}"`, 'success');
+            showToast(`Restored "${media.title}"`, 'success');
         }, 5000);
     });
 
@@ -476,7 +476,7 @@ function bindEvents() {
 
     document.getElementById('export-btn').addEventListener('click', () => {
         lib.exportLibrary(state.library, state.syncResults);
-        ui.showToast('Export triggered', 'success');
+        showToast('Export triggered', 'success');
     });
 
     // JSON Import
@@ -492,10 +492,10 @@ function bindEvents() {
                 state.library = res.library;
                 state.syncResults = res.syncResults;
                 render();
-                ui.showToast(`Imported ${res.count} titles!`, 'success');
+                showToast(`Imported ${res.count} titles!`, 'success');
                 ui.closeModal('settings-modal');
             } else {
-                ui.showToast(`Import failed: ${res.error}`, 'error');
+                showToast(`Import failed: ${res.error}`, 'error');
             }
             document.getElementById('import-file-input').value = '';
         };
@@ -512,13 +512,13 @@ function bindEvents() {
         ui.closeModal('settings-modal');
         render();
         
-        ui.showToast('All data cleared', 'info', 'Undo', () => {
+        showToast('All data cleared', 'info', 'Undo', () => {
             state.library = clonedLib;
             state.syncResults = clonedSync;
             lib.saveLibrary(state.library);
             lib.saveSyncResults(state.syncResults);
             render();
-            ui.showToast('Data restored', 'success');
+            showToast('Data restored', 'success');
         }, 5000);
     });
 
@@ -540,10 +540,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     state.library = lib.loadLibrary();
     state.syncResults = lib.loadSyncResults();
-    
-    if (!state.library.length) {
-        state.library = lib.seedDemoData(state.library);
-    }
     
     bindEvents();
     render();
