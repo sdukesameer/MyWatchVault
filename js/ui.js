@@ -51,7 +51,7 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
                 : `<div style="position:absolute;top:0;left:0;width:100%;height:100%;background:var(--bg-card);z-index:0;display:flex;align-items:center;justify-content:center;font-size:100px;opacity:0.1">${CAT_EMOJI[continueItem.category] || '🎬'}</div>`;
 
             continueWrap.innerHTML = `
-                <div style="position:relative;width:100%;height:220px;border-radius:12px;overflow:hidden;background:#000;display:flex;flex-direction:column;justify-content:flex-end;padding:20px;box-sizing:border-box;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+                <div style="position:relative;width:100%;height:100%;min-height:220px;background:#000;display:flex;flex-direction:column;justify-content:flex-end;padding:24px;box-sizing:border-box;">
                     ${posterHTML}
                     <div style="position:absolute;bottom:0;left:0;right:0;height:100%;background:linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.4) 50%, transparent 100%);z-index:1;pointer-events:none;"></div>
                     

@@ -5,14 +5,16 @@ export const CAT_LABELS = {
     'anime-series': 'Anime Series',
     'anime-movie': 'Anime Movie',
     'series': 'Web Series',
-    'movie': 'Movie'
+    'movie': 'Movie',
+    'anime': 'Anime'
 };
 
 export const CAT_EMOJI = {
     'anime-series': '⛩️',
     'anime-movie': '🎬',
     'series': '📺',
-    'movie': '🍿'
+    'movie': '🍿',
+    'anime': '⛩️'
 };
 
 export const STATUS_LABELS = {

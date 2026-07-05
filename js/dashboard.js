@@ -23,9 +23,12 @@ export function getStats(library) {
 
     library.forEach(m => {
         if (catCounts[m.category] !== undefined) catCounts[m.category]++;
-        if (m.rating > 0) {
-            sumRating += parseFloat(m.rating);
-            ratedCount++;
+        if (m.globalRating) {
+            const parsed = parseFloat(m.globalRating);
+            if (!isNaN(parsed) && parsed > 0) {
+                sumRating += parsed;
+                ratedCount++;
+            }
         }
         
         if (m.genre) {
