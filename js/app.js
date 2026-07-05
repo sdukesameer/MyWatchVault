@@ -40,13 +40,25 @@ async function fetchDeepDetails(item) {
     let attempts = 0;
     while (attempts < 3) {
         try {
-            if (item.category === 'anime-series' && item.jikanId) {
-                const res = await fetch(`https://api.jikan.moe/v4/anime/${item.jikanId}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    const eps = data.data.episodes || 0;
-                    seasons = [{ number: 1, watched: 0, total: eps }];
-                    break;
+            if (item.category === 'anime-series') {
+                let jId = item.jikanId;
+                if (!jId) {
+                    const searchRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`);
+                    if (searchRes.ok) {
+                        const sData = await searchRes.json();
+                        if (sData.data?.[0]) jId = sData.data[0].mal_id;
+                    }
+                }
+                
+                if (jId) {
+                    const res = await fetch(`https://api.jikan.moe/v4/anime/${jId}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        const eps = data.data.episodes || 0;
+                        seasons = [{ number: 1, watched: 0, total: eps }];
+                        item.jikanId = jId; // save it
+                        break;
+                    }
                 }
             } else if (item.category === 'series' && item.tvmazeId) {
                 const res = await fetch(`https://api.tvmaze.com/shows/${item.tvmazeId}/seasons`);
@@ -132,6 +144,11 @@ function render() {
     
     const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy);
     ui.renderGrid(filtered, state.syncResults, state.currentCat, openDetail);
+    
+    // Re-render recommendations if they are loaded so that "✓ In Vault" updates
+    if (allRecosLoaded.length > 0 && recoCallback) {
+        renderRecommendations(allRecosLoaded, state.library, recoCallback);
+    }
 }
 
 // ── Search & Unsplash (Posters) ─────────────────────────────────
@@ -192,6 +209,7 @@ async function handleRunSync() {
 
 // ── Reco Handler ────────────────────────────────────────────────
 let allRecosLoaded = [];
+let recoCallback = null;
 async function handleFetchRecos(append = false) {
     try {
         showLoading(append ? 'Loading more...' : 'Finding recommendations…', 'AI is analysing your taste profile');
@@ -213,7 +231,7 @@ async function handleFetchRecos(append = false) {
         hideLoading();
         showToast(`Found recos! (via ${getLastProvider()})`, 'success');
         
-        renderRecommendations(allRecosLoaded, state.library, async (item) => {
+        recoCallback = async (item) => {
             showLoading('Fetching details...');
             const detailTimeout = setTimeout(() => hideLoading(), 10000);
             const seasons = await fetchDeepDetails(item);
@@ -233,7 +251,9 @@ async function handleFetchRecos(append = false) {
             };
             state.previewItem = previewItem;
             ui.openDetailModal(previewItem);
-        }, append);
+        };
+        
+        renderRecommendations(allRecosLoaded, state.library, recoCallback);
         
         document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
     } catch (err) {
@@ -379,8 +399,10 @@ function bindEvents() {
     // Detail Modal
     const checkDetailUnsaved = () => {
         const currentData = ui.collectDetailData();
-        if (currentData.id.startsWith('preview_')) return true;
-        const media = state.library.find(m => m.id === currentData.id);
+        let media = state.library.find(m => m.id === currentData.id);
+        if (!media && currentData.id.startsWith('preview_')) {
+            media = state.previewItem;
+        }
         if (!media) return false;
         
         const currentSeasonsNorm = (currentData.seasons || []).map(s => ({

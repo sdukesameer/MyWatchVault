@@ -78,15 +78,18 @@ ONLY valid JSON array, no markdown.`;
     return enhanced;
 }
 
-export function renderRecommendations(recos, library, onQuickAdd, append = false) {
+export function renderRecommendations(items, library, onQuickAdd) {
     const grid = document.getElementById('reco-grid');
-    if (!recos.length && !append) {
-        grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="icon">🤔</div><h3>No recommendations yet</h3><p>Rate or complete some titles to get personalised picks.</p></div>`;
+    if (!grid) return;
+    
+    grid.innerHTML = '';
+
+    if (items.length === 0) {
+        grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">🤔</div><h3>No recommendations yet</h3><p>Rate or complete some titles to get personalised picks.</p></div>';
         return;
     }
     
-    if (!append) grid.innerHTML = '';
-    recos.forEach(item => {
+    items.forEach(item => {
         const inLib = library.some(m => m.title.toLowerCase() === item.title.toLowerCase());
         const card = document.createElement('div');
         card.className = 'media-card'; // Use media-card class so it shares the grid styling

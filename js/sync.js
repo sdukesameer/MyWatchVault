@@ -81,7 +81,7 @@ export async function runSync(library, config, onProgress) {
                             upToDate: true
                         };
                     }
-                } else if (media.category === 'series') {
+                } else if (media.category === 'series' || media.category === 'anime-series') {
                     const res = await (await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}?api_key=${config.tmdbKey || ''}`)).json().catch(()=>({}));
                     if (res.status) {
                         result = {
