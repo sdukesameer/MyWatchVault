@@ -35,27 +35,40 @@ async function fetchDeepDetails(item) {
     if (detailCache.has(cacheKey)) return detailCache.get(cacheKey);
     
     let seasons = [];
-    try {
-        if (item.category === 'anime-series' && item.jikanId) {
-            const res = await fetch(`https://api.jikan.moe/v4/anime/${item.jikanId}`);
-            if (res.ok) {
-                const data = await res.json();
-                const eps = data.data.episodes || 0;
-                seasons = [{ number: 1, watched: 0, total: eps }];
+    let attempts = 0;
+    while (attempts < 3) {
+        try {
+            if (item.category === 'anime-series' && item.jikanId) {
+                const res = await fetch(`https://api.jikan.moe/v4/anime/${item.jikanId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const eps = data.data.episodes || 0;
+                    seasons = [{ number: 1, watched: 0, total: eps }];
+                    break;
+                }
+            } else if (item.category === 'series' && item.tvmazeId) {
+                const res = await fetch(`https://api.tvmaze.com/shows/${item.tvmazeId}/seasons`);
+                if (res.ok) {
+                    const data = await res.json();
+                    seasons = data.filter(s => s.number > 0).map(s => ({
+                        number: s.number,
+                        watched: 0,
+                        total: s.episodeOrder || 0
+                    }));
+                    break;
+                }
+            } else {
+                break; // Not a supported category for deep fetch
             }
-        } else if (item.category === 'series' && item.tvmazeId) {
-            const res = await fetch(`https://api.tvmaze.com/shows/${item.tvmazeId}/seasons`);
-            if (res.ok) {
-                const data = await res.json();
-                seasons = data.filter(s => s.number > 0).map(s => ({
-                    number: s.number,
-                    watched: 0,
-                    total: s.episodeOrder || 0
-                }));
-            }
+        } catch (e) {
+            console.warn(`Deep fetch error (attempt ${attempts + 1}):`, e);
         }
-    } catch (e) {
-        console.error("Deep fetch error", e);
+        attempts++;
+        if (attempts < 3) await new Promise(r => setTimeout(r, 600)); // wait before retry
+    }
+    
+    if (attempts === 3) {
+        ui.showToast(`Failed to fetch latest season data for ${item.title}`, 'error');
     }
     
     if ((item.category === 'series' || item.category === 'anime-series') && seasons.length === 0) {
@@ -109,8 +122,15 @@ function render() {
     
     const watching = state.library.filter(m => m.status === 'watching');
     watching.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
-    const continueItem = watching.length > 0 ? watching[0] : null;
+    let continueItem = watching.length > 0 ? watching[0] : null;
 
+    if (!continueItem) {
+        const planToWatch = state.library.filter(m => m.status === 'plan-to-watch');
+        if (planToWatch.length > 0) {
+            continueItem = planToWatch[Math.floor(Math.random() * planToWatch.length)];
+            continueItem.isFallback = true;
+        }
+    }
     let upcoming = state.library.filter(m => m.hasNew || m.status === 'plan-to-watch');
     upcoming.sort((a, b) => {
         if (a.hasNew && !b.hasNew) return -1;
@@ -189,7 +209,8 @@ async function searchTitles(query) {
                         genre: a.genres?.map(g => g.name).join(', ') || 'Anime',
                         description: (a.synopsis || '').slice(0, 150) + '...',
                         poster: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url,
-                        jikanId: a.mal_id
+                        jikanId: a.mal_id,
+                        globalRating: a.score ? `${a.score} ★` : null
                     });
                 });
             }
@@ -204,7 +225,8 @@ async function searchTitles(query) {
                         genre: s.genres?.join(', ') || 'Series',
                         description: (s.summary || '').replace(/<[^>]*>?/gm, '').slice(0, 150) + '...',
                         poster: s.image?.original || s.image?.medium,
-                        tvmazeId: s.id
+                        tvmazeId: s.id,
+                        globalRating: s.rating?.average ? `${s.rating.average} ★` : null
                     });
                 });
             }
@@ -218,7 +240,8 @@ async function searchTitles(query) {
                         genre: 'Movie',
                         description: (m.overview || '').slice(0, 150) + '...',
                         poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null,
-                        tmdbId: m.id
+                        tmdbId: m.id,
+                        globalRating: m.vote_average ? `${m.vote_average.toFixed(1)} ★` : null
                     });
                 });
             }
@@ -232,7 +255,8 @@ async function searchTitles(query) {
                         genre: 'Series',
                         description: (s.overview || '').slice(0, 150) + '...',
                         poster: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
-                        tmdbId: s.id
+                        tmdbId: s.id,
+                        globalRating: s.vote_average ? `${s.vote_average.toFixed(1)} ★` : null
                     });
                 });
             }
@@ -336,8 +360,13 @@ async function searchTitles(query) {
 // ── Sync Handler ────────────────────────────────────────────────
 async function handleRunSync() {
     try {
-        ui.showLoading('Running sync…', 'Checking latest status of your tracked titles');
-        const res = await runSync(state.library, state.config);
+        let completed = 0;
+        const total = state.library.length;
+        ui.showLoading('Running sync…', `Checking latest status of your tracked titles (0/${total})`);
+        const res = await runSync(state.library, state.config, () => {
+            completed++;
+            document.getElementById('loading-sub').textContent = `Checking latest status of your tracked titles (${completed}/${total})`;
+        });
         
         state.library = res.updatedLibrary;
         state.syncResults = res.syncResults;
@@ -359,17 +388,29 @@ async function handleRunSync() {
 }
 
 // ── Reco Handler ────────────────────────────────────────────────
+let allRecosLoaded = [];
 async function handleFetchRecos(append = false) {
     try {
         ui.showLoading(append ? 'Loading more...' : 'Finding recommendations…', 'AI is analysing your taste profile');
-        const timeout = setTimeout(() => ui.hideLoading(), 15000); // 15s safety timeout
+        const timeout = setTimeout(() => {
+            ui.hideLoading();
+            ui.showToast('Recommendations took too long', 'error');
+        }, 30000); // 30s safety timeout for slow LLMs
         
-        const recos = await fetchRecommendations(state.library, state.config);
+        const excludeTitles = append ? allRecosLoaded.map(r => r.title) : [];
+        const recos = await fetchRecommendations(state.library, state.config, excludeTitles);
+        
+        if (append) {
+            allRecosLoaded = [...allRecosLoaded, ...recos];
+        } else {
+            allRecosLoaded = recos;
+        }
+        
         clearTimeout(timeout);
         ui.hideLoading();
         ui.showToast(`Found recos! (via ${getLastProvider()})`, 'success');
         
-        renderRecommendations(recos, state.library, async (item) => {
+        renderRecommendations(allRecosLoaded, state.library, async (item) => {
             ui.showLoading('Fetching details...');
             const detailTimeout = setTimeout(() => ui.hideLoading(), 10000);
             const seasons = await fetchDeepDetails(item);

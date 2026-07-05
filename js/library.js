@@ -59,6 +59,7 @@ export function addMedia(lib, item) {
         status: item.status || 'plan-to-watch',
         seasons: item.seasons || [],
         rating: item.rating || 0,
+        globalRating: item.globalRating || null,
         notes: item.notes || '',
         poster: item.poster || null,
         addedAt: new Date().toISOString(),

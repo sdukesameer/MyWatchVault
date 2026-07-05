@@ -14,7 +14,9 @@ export async function runSync(library, config, onProgress) {
     const promises = updatedLibrary.map(async (media) => {
         let result = null;
         try {
-            if (media.jikanId) {
+            if (media.category === 'movie' || media.category === 'anime-movie') {
+                result = { latestStatus: 'Released', isOngoing: false, upToDate: true };
+            } else if (media.jikanId) {
                 const res = await fetch(`https://api.jikan.moe/v4/anime/${media.jikanId}`).then(r=>r.json());
                 if (res.data) {
                     result = {
@@ -119,6 +121,7 @@ export async function runSync(library, config, onProgress) {
         } catch (e) {
             console.warn(`Sync failed for ${media.title}:`, e);
         }
+        if (onProgress) onProgress();
     });
 
     await Promise.allSettled(promises);

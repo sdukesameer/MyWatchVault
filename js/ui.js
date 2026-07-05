@@ -53,12 +53,15 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
     const continueWrap = document.getElementById('continue-content');
     if (continueWrap) {
         if (!continueItem) {
-            continueWrap.innerHTML = `<div class="continue-empty">Nothing actively watching. Start a new show!</div>`;
+            continueWrap.innerHTML = `<div class="continue-empty">Your vault is completely empty. Start tracking your favorites!</div>`;
         } else {
             let progressText = '';
             let progressPercent = 0;
             
-            if (continueItem.category === 'movie' || continueItem.category === 'anime-movie') {
+            if (continueItem.isFallback) {
+                progressText = 'Next up in your vault';
+                progressPercent = 0;
+            } else if (continueItem.category === 'movie' || continueItem.category === 'anime-movie') {
                 progressText = 'Watching';
                 progressPercent = 50;
             } else {
@@ -182,7 +185,7 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
                 <div class="card-meta">
                     ${media.year ? `<span>${escapeHTML(media.year)}</span>` : ''}
                     ${media.genre ? `<span>${escapeHTML(media.genre.split(',')[0])}</span>` : ''}
-                    ${media.rating ? `<span>⭐ ${media.rating}/5</span>` : ''}
+                    ${media.rating ? `<span>⭐ ${media.rating}/5</span>` : (media.globalRating ? `<span>⭐ ${escapeHTML(media.globalRating)}</span>` : '')}
                 </div>
                 ${progressHTML}
                 ${tagsHTML}

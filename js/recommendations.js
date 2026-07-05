@@ -6,7 +6,7 @@ import { CAT_LABELS, CAT_EMOJI, escapeHTML } from './ui.js';
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-export async function fetchRecommendations(library, config) {
+export async function fetchRecommendations(library, config, excludeTitles = []) {
     if (library.length < 2) {
         throw new Error('Add more titles for better recommendations!');
     }
@@ -17,12 +17,12 @@ export async function fetchRecommendations(library, config) {
         .slice(0, 15)
         .join(', ');
 
-    const allTitles = library.map(m => m.title).join(', ');
+    const allTitles = [...library.map(m => m.title), ...excludeTitles].join(', ');
     const cats = [...new Set(library.map(m => m.category))].join(', ');
 
     const prompt = `You are a media recommendation expert. Based on this user's watch history:
 Top rated / completed: ${liked || 'none yet'}
-All tracked: ${allTitles}
+All tracked and previously recommended: ${allTitles}
 Preferred categories: ${cats}
 
 Recommend 5 titles they would love that are NOT in their list.
@@ -49,6 +49,8 @@ ONLY valid JSON array, no markdown.`;
                     item.poster = match.images?.jpg?.large_image_url || match.images?.jpg?.image_url;
                     item.jikanId = match.mal_id;
                     item.year = match.year || item.year;
+                    item.globalRating = match.score ? `${match.score} ★` : null;
+                    if (match.type === 'Movie') item.category = 'anime-movie';
                 }
             } else if (item.category === 'series') {
                 const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`).then(r=>r.json());
@@ -56,6 +58,7 @@ ONLY valid JSON array, no markdown.`;
                     const match = res[0].show;
                     item.poster = match.image?.original || match.image?.medium;
                     item.tvmazeId = match.id;
+                    item.globalRating = match.rating?.average ? `${match.rating.average} ★` : null;
                 }
             } else if (item.category === 'movie') {
                 const res = await import('./api.js').then(m => m.callTMDB('search-movie', { query: item.title }, config));
@@ -63,6 +66,7 @@ ONLY valid JSON array, no markdown.`;
                     const match = res.results[0];
                     item.poster = match.poster_path ? 'https://image.tmdb.org/t/p/w500' + match.poster_path : null;
                     item.tmdbId = match.id;
+                    item.globalRating = match.vote_average ? `${match.vote_average.toFixed(1)} ★` : null;
                 }
             }
         } catch (e) {
