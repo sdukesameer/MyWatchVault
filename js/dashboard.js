@@ -79,12 +79,7 @@ export function getDashboardItems(library) {
     }
 
     let upcoming = library.filter(m => m.hasNew || m.status === 'plan-to-watch');
-    upcoming.sort((a, b) => {
-        if (a.hasNew && !b.hasNew) return -1;
-        if (!a.hasNew && b.hasNew) return 1;
-        return new Date(b.addedAt) - new Date(a.addedAt);
-    });
-    upcoming = upcoming.slice(0, 4);
+    upcoming = upcoming.sort(() => 0.5 - Math.random()).slice(0, 3);
 
     return { continueItem, upcoming };
 }

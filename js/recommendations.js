@@ -7,7 +7,7 @@ import { escapeHTML } from './utils.js';
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-export async function fetchRecommendations(library, config, excludeTitles = []) {
+export async function fetchRecommendations(library, config, excludeTitles = [], onProgress = null) {
     if (library.length < 2) {
         throw new Error('Add more titles for better recommendations!');
     }
@@ -37,6 +37,7 @@ ONLY valid JSON array, no markdown.`;
     // Enhance with real API data for posters and IDs sequentially to avoid rate limits
     const enhanced = [];
     for (const item of recos) {
+        if (onProgress) onProgress(`Fetching details for ${item.title}...`);
         try {
             // Normalize category if AI hallucinates it
             if (item.category === 'anime') item.category = 'anime-series';

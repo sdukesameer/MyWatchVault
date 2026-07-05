@@ -178,9 +178,12 @@
 <!-- ══════ MEDIA DETAIL MODAL ══════ -->
 <div id="detail-modal" class="modal-overlay hidden">
     <div class="modal-card wide">
-        <div class="modal-header">
-            <div>
-                <div class="modal-title" id="detail-title">—</div>
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div style="flex:1;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div class="modal-title" id="detail-title">—</div>
+                    <button class="btn btn-secondary btn-sm" id="detail-sync-btn" style="padding:4px 8px; font-size:12px;" title="Fetch latest episodes/seasons">🔄 Sync</button>
+                </div>
                 <div class="modal-subtitle" id="detail-subtitle">—</div>
             </div>
             <button class="modal-close" id="detail-close">✕</button>

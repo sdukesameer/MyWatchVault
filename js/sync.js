@@ -111,6 +111,10 @@ export async function runSync(library, config, onProgress) {
                 newSyncResults[media.id] = result;
                 media.hasNew = result.hasNewContent;
                 
+                if (result.hasNewContent && media.status === 'completed') {
+                    media.status = 'watching';
+                }
+                
                 if (media.category.includes('series')) {
                     if (result.latestSeason && typeof result.latestSeason === 'number') {
                         while (media.seasons.length < result.latestSeason) {

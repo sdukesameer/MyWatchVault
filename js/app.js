@@ -219,7 +219,10 @@ async function handleFetchRecos(append = false) {
         }, 30000); // 30s safety timeout for slow LLMs
         
         const excludeTitles = append ? allRecosLoaded.map(r => r.title) : [];
-        const recos = await fetchRecommendations(state.library, state.config, excludeTitles);
+        excludeTitles.push(...state.library.map(m => m.title));
+        const recos = await fetchRecommendations(state.library, state.config, excludeTitles, (msg) => {
+            showLoading(append ? 'Loading more...' : 'Finding recommendations…', msg);
+        });
         
         if (append) {
             allRecosLoaded = [...allRecosLoaded, ...recos];
@@ -405,16 +408,20 @@ function bindEvents() {
         }
         if (!media) return false;
         
-        const currentSeasonsNorm = (currentData.seasons || []).map(s => ({
+        let currentSeasonsNorm = (currentData.seasons || []).map(s => ({
             number: parseInt(s.number) || 0,
             watched: parseInt(s.watched) || 0,
             total: parseInt(s.total) || 0
         }));
-        const mediaSeasonsNorm = (media.seasons || []).map(s => ({
+        let mediaSeasonsNorm = (media.seasons || []).map(s => ({
             number: parseInt(s.number) || 0,
             watched: parseInt(s.watched) || 0,
             total: parseInt(s.total) || 0
         }));
+        
+        if (mediaSeasonsNorm.length === 0 && currentSeasonsNorm.length === 1 && currentSeasonsNorm[0].watched === 0 && currentSeasonsNorm[0].total === 0) {
+            currentSeasonsNorm = [];
+        }
         
         const seasonsMatch = JSON.stringify(currentSeasonsNorm) === JSON.stringify(mediaSeasonsNorm);
         return currentData.status !== media.status || 
@@ -466,6 +473,60 @@ function bindEvents() {
                 showToast('Saved ✓', 'success');
             }
         }
+    });
+
+    document.getElementById('detail-sync-btn').addEventListener('click', async () => {
+        const data = ui.collectDetailData();
+        let media = state.library.find(m => m.id === data.id);
+        if (!media && data.id.startsWith('preview_')) media = state.previewItem;
+        if (!media) return;
+        
+        showLoading('Syncing item...', 'Fetching latest seasons and episodes');
+        try {
+            // Re-fetch deep details
+            detailCache.delete(media.category + '_' + (media.jikanId || media.tvmazeId || media.tmdbId || media.title));
+            const newSeasons = await fetchDeepDetails(media);
+            
+            // Merge seasons (preserve watched count)
+            if (newSeasons && newSeasons.length > 0) {
+                newSeasons.forEach(ns => {
+                    const existing = (media.seasons || []).find(s => s.number === ns.number);
+                    if (existing) ns.watched = existing.watched;
+                });
+                media.seasons = newSeasons;
+                
+                // Refresh modal
+                ui.openDetailModal(media);
+                
+                // Update sync results if not a preview
+                if (!data.id.startsWith('preview_')) {
+                    const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
+                    const totalEpisodes = media.seasons.reduce((acc, s) => acc + s.total, 0);
+                    const upToDate = totalEpisodes > 0 && totalWatched >= totalEpisodes;
+                    state.syncResults[media.id] = {
+                        latestSeason: media.seasons.length,
+                        latestEpisodes: totalEpisodes,
+                        upToDate: upToDate,
+                        isOngoing: false // Simple assumption for manual sync
+                    };
+                    
+                    if (!upToDate && media.status === 'completed') {
+                        media.status = 'watching';
+                    }
+                    
+                    lib.saveSyncResults(state.syncResults);
+                    // Autosave the library to lock in the new seasons and status
+                    lib.updateMedia(state.library, media.id, { seasons: media.seasons, status: media.status });
+                    render();
+                }
+                showToast('Sync successful', 'success');
+            } else {
+                showToast('No new data found', 'info');
+            }
+        } catch (e) {
+            showToast('Sync failed: ' + e.message, 'error');
+        }
+        hideLoading();
     });
 
     document.getElementById('detail-delete-btn').addEventListener('click', () => {
