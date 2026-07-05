@@ -93,25 +93,40 @@ ONLY valid JSON array, no markdown.`;
                     ? `<span style="font-size:11px;color:var(--success);font-weight:600;">✓ In Vault</span>`
                     : `<button class="search-item-add" data-title='${JSON.stringify(item).replace(/'/g, "&apos;")}'>+ Add</button>`}`;
 
-            const btn = div.querySelector('.search-item-add');
-            if (btn) {
-                btn.addEventListener('click', async (e) => {
+            if (!inLib) {
+                div.addEventListener('click', async (e) => {
                     e.stopPropagation();
-                    const data = JSON.parse(e.target.dataset.title);
+                    const btn = div.querySelector('.search-item-add');
+                    if (btn) {
+                        btn.textContent = 'Adding...';
+                        btn.disabled = true;
+                    }
+                    ui.showLoading(`Adding ${item.title}...`, 'Fetching posters');
                     
-                    // Fetch poster via Unsplash directly (basic attempt)
-                    if (state.config.unsplashKey) {
-                        try {
-                            const q = encodeURIComponent(`${data.title} movie poster`);
-                            const res = await fetch(`https://api.unsplash.com/search/photos?query=${q}&per_page=1&orientation=portrait&client_id=${state.config.unsplashKey}`);
-                            if (res.ok) {
-                                const photoData = await res.json();
-                                if (photoData.results?.[0]?.urls?.small) data.poster = photoData.results[0].urls.small;
-                            }
-                        } catch {}
+                    try {
+                        let posterUrl = null;
+                        if (item.category.includes('anime')) {
+                            const res = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`);
+                            const json = await res.json();
+                            posterUrl = json.data?.[0]?.images?.jpg?.large_image_url || json.data?.[0]?.images?.jpg?.image_url;
+                        } 
+                        if (!posterUrl && (item.category === 'series' || item.category.includes('anime'))) {
+                            const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`);
+                            const json = await res.json();
+                            posterUrl = json[0]?.show?.image?.original || json[0]?.show?.image?.medium;
+                        }
+                        if (!posterUrl && state.config.unsplashKey) {
+                             const res = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(item.title + ' movie poster')}&per_page=1&orientation=portrait&client_id=${state.config.unsplashKey}`);
+                             const photoData = await res.json();
+                             posterUrl = photoData.results?.[0]?.urls?.small;
+                        }
+                        if (posterUrl) item.poster = posterUrl;
+                    } catch(err) {
+                        console.warn('Poster fetch failed', err);
                     }
                     
-                    const media = lib.addMedia(state.library, data);
+                    const media = lib.addMedia(state.library, item);
+                    ui.hideLoading();
                     ui.showToast(`"${media.title}" added to vault ✓`, 'success');
                     dropdown.style.display = 'none';
                     document.getElementById('search-input').value = '';
