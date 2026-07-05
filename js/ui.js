@@ -23,6 +23,13 @@ const STATUS_DOT_CLASS = {
 
 let editingId = null;
 
+export function escapeHTML(str) {
+    if (typeof str !== 'string' && typeof str !== 'number') return '';
+    return String(str).replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+}
+
 export function renderStats(stats) {
     document.getElementById('stat-total').textContent = stats.total;
     document.getElementById('stat-watching').textContent = stats.watching;
@@ -61,12 +68,14 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
         const card = document.createElement('div');
         card.className = 'media-card';
         card.dataset.id = media.id;
+        card.tabIndex = 0;
 
         const syncData = syncResults[media.id];
         const hasNew = media.hasNew && syncData;
 
+        const escapedTitle = escapeHTML(media.title);
         const posterHTML = media.poster
-            ? `<img src="${media.poster}" alt="${media.title}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            ? `<img src="${escapeHTML(media.poster)}" alt="${escapedTitle}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
             : '';
         const placeholderStyle = media.poster ? 'style="display:none"' : '';
 
@@ -89,23 +98,24 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
                 ${posterHTML}
                 <div class="card-poster-placeholder" ${placeholderStyle}>
                     <span>${CAT_EMOJI[media.category] || '🎬'}</span>
-                    <span>${media.title.slice(0, 18)}</span>
+                    <span>${escapedTitle.slice(0, 18)}</span>
                 </div>
                 <div class="card-badge ${media.category?.split('-')[0]}">${CAT_LABELS[media.category] || 'Unknown'}</div>
                 <div class="card-status-dot ${statusDotClass}" title="${STATUS_LABELS[media.status] || ''}"></div>
                 ${newBadge}
             </div>
             <div class="card-body">
-                <div class="card-title" title="${media.title}">${media.title}</div>
+                <div class="card-title" title="${escapedTitle}">${escapedTitle}</div>
                 <div class="card-meta">
-                    ${media.year ? `<span>${media.year}</span>` : ''}
-                    ${media.genre ? `<span>${media.genre.split(',')[0]}</span>` : ''}
+                    ${media.year ? `<span>${escapeHTML(media.year)}</span>` : ''}
+                    ${media.genre ? `<span>${escapeHTML(media.genre.split(',')[0])}</span>` : ''}
                     ${media.rating ? `<span>⭐ ${media.rating}/5</span>` : ''}
                 </div>
                 ${progressHTML}
             </div>`;
 
         card.addEventListener('click', () => onCardClick(media.id));
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onCardClick(media.id); });
         grid.appendChild(card);
     });
 }
@@ -118,7 +128,7 @@ export function openDetailModal(media) {
 
     const posterWrap = document.getElementById('detail-poster-wrap');
     if (media.poster) {
-        posterWrap.innerHTML = `<img class="detail-poster" src="${media.poster}" alt="${media.title}" onerror="this.outerHTML='<div class=detail-poster-placeholder>${CAT_EMOJI[media.category]}</div>'">`;
+        posterWrap.innerHTML = `<img class="detail-poster" src="${escapeHTML(media.poster)}" alt="${escapeHTML(media.title)}" onerror="this.outerHTML='<div class=detail-poster-placeholder>${CAT_EMOJI[media.category]}</div>'">`;
     } else {
         posterWrap.innerHTML = `<div class="detail-poster-placeholder">${CAT_EMOJI[media.category] || '🎬'}</div>`;
     }
@@ -128,7 +138,7 @@ export function openDetailModal(media) {
     if (media.year) pills.push({ text: media.year });
     if (media.genre) pills.push({ text: media.genre });
     if (media.seasons?.length) pills.push({ text: `${media.seasons.length} Season${media.seasons.length !== 1 ? 's' : ''}`, highlight: true });
-    metaEl.innerHTML = pills.map(p => `<span class="meta-pill${p.highlight ? ' highlight' : ''}">${p.text}</span>`).join('');
+    metaEl.innerHTML = pills.map(p => `<span class="meta-pill${p.highlight ? ' highlight' : ''}">${escapeHTML(p.text)}</span>`).join('');
 
     document.getElementById('detail-desc').textContent = media.description || '';
 
@@ -278,14 +288,14 @@ export function renderConfirmModal(title, text, confirmText, onConfirm) {
     modal.innerHTML = `
         <div class="modal-card narrow">
             <div class="modal-header">
-                <div class="modal-title">${title}</div>
+                <div class="modal-title">${escapeHTML(title)}</div>
             </div>
             <div class="modal-body">
-                <p style="font-size: 14px; color: var(--text-dim); line-height: 1.6;">${text}</p>
+                <p style="font-size: 14px; color: var(--text-dim); line-height: 1.6;">${escapeHTML(text)}</p>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary confirm-cancel">Cancel</button>
-                <button class="btn btn-primary confirm-action" style="background:var(--danger); box-shadow: 0 4px 20px rgba(255,71,87,0.35);">${confirmText}</button>
+                <button class="btn btn-primary confirm-action" style="background:var(--danger); box-shadow: 0 4px 20px rgba(255,71,87,0.35);">${escapeHTML(confirmText)}</button>
             </div>
         </div>
     `;

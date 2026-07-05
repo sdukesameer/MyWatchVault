@@ -6,6 +6,7 @@ import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations } from './recommendations.js';
 import { callAI, extractJSON, getLastProvider } from './api.js';
+import { escapeHTML } from './ui.js';
 
 const state = {
     library: [],
@@ -13,7 +14,8 @@ const state = {
     config: {},
     currentCat: 'all',
     sortBy: 'recently-added',
-    filterStatus: 'all'
+    filterStatus: 'all',
+    searchCache: new Map()
 };
 
 // ── Environment Loading ──────────────────────────────────────────
@@ -65,36 +67,47 @@ async function searchTitles(query) {
         <div class="search-item skeleton" style="height: 80px;"></div>
     `;
 
-    try {
-        const prompt = `Search for entertainment titles matching: "${query}"
+    let results = [];
+    if (state.searchCache.has(query.toLowerCase())) {
+        results = state.searchCache.get(query.toLowerCase());
+    } else {
+        try {
+            const prompt = `Search for entertainment titles matching: "${query}"
 Return a JSON array of up to 6 results. Each: { "title": "...", "year": 2024, "category": "anime-series|anime-movie|series|movie", "genre": "Action, Drama", "description": "1-2 sentence description" }
 ONLY valid JSON array, no markdown.`;
 
-        const text = await callAI(prompt, state.config);
-        const results = extractJSON(text);
-
-        if (!results.length) {
-            dropdown.innerHTML = `<div class="search-no-results">No results. Try "+ Add Manually"</div>`;
+            const text = await callAI(prompt, state.config);
+            results = extractJSON(text);
+            state.searchCache.set(query.toLowerCase(), results);
+        } catch (err) {
+            dropdown.innerHTML = `<div class="search-no-results">${err.message}</div>`;
             return;
         }
+    }
 
-        dropdown.innerHTML = '';
+    if (!results.length) {
+        dropdown.innerHTML = `<div class="search-no-results">No results. Try "+ Add Manually"</div>`;
+        return;
+    }
+
+    dropdown.innerHTML = '';
         results.forEach(item => {
             const inLib = state.library.some(m => m.title.toLowerCase() === item.title.toLowerCase());
             const div = document.createElement('div');
             div.className = 'search-item';
+            div.tabIndex = 0;
             div.innerHTML = `
                 <div class="card-poster-placeholder" style="width:40px;height:56px;font-size:24px;border-radius:6px;background:var(--surface);border:1px solid var(--border);">${ui.CAT_EMOJI[item.category] || '🎬'}</div>
                 <div class="search-item-info">
-                    <div class="search-item-title">${item.title}</div>
-                    <div class="search-item-meta">${ui.CAT_LABELS[item.category] || ''} · ${item.year || '?'} · ${item.genre || ''}</div>
+                    <div class="search-item-title">${escapeHTML(item.title)}</div>
+                    <div class="search-item-meta">${ui.CAT_LABELS[item.category] || ''} · ${escapeHTML(item.year || '?')} · ${escapeHTML(item.genre || '')}</div>
                 </div>
                 ${inLib
                     ? `<span style="font-size:11px;color:var(--success);font-weight:600;">✓ In Vault</span>`
-                    : `<button class="search-item-add" data-title='${JSON.stringify(item).replace(/'/g, "&apos;")}'>+ Add</button>`}`;
+                    : `<button class="search-item-add" tabindex="-1" data-title='${JSON.stringify(item).replace(/'/g, "&apos;")}'>+ Add</button>`}`;
 
             if (!inLib) {
-                div.addEventListener('click', async (e) => {
+                const addHandler = async (e) => {
                     e.stopPropagation();
                     const btn = div.querySelector('.search-item-add');
                     if (btn) {
@@ -132,13 +145,13 @@ ONLY valid JSON array, no markdown.`;
                     document.getElementById('search-input').value = '';
                     render();
                     ui.openDetailModal(media);
-                });
+                };
+                
+                div.addEventListener('click', addHandler);
+                div.addEventListener('keydown', (e) => { if (e.key === 'Enter') addHandler(e); });
             }
             dropdown.appendChild(div);
         });
-    } catch (err) {
-        dropdown.innerHTML = `<div class="search-no-results">${err.message}</div>`;
-    }
 }
 
 // ── Sync Handler ────────────────────────────────────────────────
@@ -149,10 +162,11 @@ async function handleRunSync() {
         
         state.library = res.updatedLibrary;
         state.syncResults = res.syncResults;
-        state.syncResults._meta = { lastSync: new Date().toISOString() };
+        const syncMeta = { lastSync: new Date().toISOString() };
         
         lib.saveLibrary(state.library);
         lib.saveSyncResults(state.syncResults);
+        lib.saveSyncMeta(syncMeta);
         
         ui.hideLoading();
         ui.showToast(`Sync complete! (via ${getLastProvider()})`, 'success');
@@ -250,6 +264,12 @@ function bindEvents() {
         const category = document.getElementById('add-category').value;
         if (!title || !category) { ui.showToast('Fill in title and category', 'error'); return; }
         
+        const isDuplicate = state.library.some(m => m.title.toLowerCase() === title.toLowerCase() && m.category === category);
+        if (isDuplicate) {
+            ui.showToast(`"${title}" is already in your vault!`, 'error');
+            return;
+        }
+
         const media = lib.addMedia(state.library, {
             title, category,
             year: parseInt(document.getElementById('add-year').value) || null,
@@ -268,9 +288,33 @@ function bindEvents() {
     });
 
     // Detail Modal
-    document.getElementById('detail-close').addEventListener('click', () => ui.closeModal('detail-modal'));
-    document.getElementById('detail-cancel-btn').addEventListener('click', () => ui.closeModal('detail-modal'));
-    document.getElementById('detail-modal').addEventListener('click', e => { if (e.target === e.currentTarget) ui.closeModal('detail-modal'); });
+    const checkDetailUnsaved = () => {
+        const currentData = ui.collectDetailData();
+        const media = state.library.find(m => m.id === currentData.id);
+        if (!media) return false;
+        const seasonsMatch = JSON.stringify(currentData.seasons || []) === JSON.stringify(media.seasons || []);
+        return currentData.status !== media.status || 
+               currentData.rating !== (media.rating || 0) || 
+               currentData.notes !== (media.notes || '') || 
+               !seasonsMatch;
+    };
+
+    const handleDetailClose = () => {
+        if (checkDetailUnsaved()) {
+            ui.renderConfirmModal(
+                'Unsaved Changes',
+                'You have unsaved changes. Are you sure you want to discard them?',
+                'Discard',
+                () => ui.closeModal('detail-modal')
+            );
+        } else {
+            ui.closeModal('detail-modal');
+        }
+    };
+
+    document.getElementById('detail-close').addEventListener('click', handleDetailClose);
+    document.getElementById('detail-cancel-btn').addEventListener('click', handleDetailClose);
+    document.getElementById('detail-modal').addEventListener('click', e => { if (e.target === e.currentTarget) handleDetailClose(); });
 
     document.getElementById('add-season-btn').addEventListener('click', () => {
         const grid = document.getElementById('seasons-grid');

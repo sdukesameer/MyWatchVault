@@ -3,8 +3,25 @@
 
 exports.handler = async (event, context) => {
     context.callbackWaitsForEmptyEventLoop = false;
+    
+    const origin = event.headers.origin || event.headers.Origin || '';
+    const allowedOrigins = ['http://localhost:3000', 'https://mywatchvault.netlify.app'];
+    const corsHeaders = {
+        'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : allowedOrigins[1],
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    };
+
+    if (event.httpMethod === 'OPTIONS') {
+        return { statusCode: 200, headers: corsHeaders, body: '' };
+    }
+
+    if (origin && !allowedOrigins.includes(origin) && !origin.includes('127.0.0.1') && !origin.includes('localhost')) {
+        return { statusCode: 403, headers: corsHeaders, body: JSON.stringify({ error: 'Forbidden Origin' }) };
+    }
+
     if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, body: 'Method Not Allowed' };
+        return { statusCode: 405, headers: corsHeaders, body: 'Method Not Allowed' };
     }
 
     let body;
@@ -189,13 +206,14 @@ exports.handler = async (event, context) => {
     if (!text) {
         return {
             statusCode: 500,
+            headers: corsHeaders,
             body: JSON.stringify({ error: 'All AI providers failed', details: errorDetails.join(', ') })
         };
     }
 
     return {
         statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, providerUsed }),
     };
 };

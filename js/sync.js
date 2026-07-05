@@ -2,7 +2,7 @@
 // AI Sync Engine
 
 import { callAI, extractJSON } from './api.js';
-import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './ui.js';
+import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, escapeHTML } from './ui.js';
 
 export async function runSync(library, config, onProgress) {
     if (!library.length) {
@@ -54,6 +54,20 @@ Return ONLY valid JSON array.`;
         if (result) {
             newSyncResults[media.id] = result;
             media.hasNew = result.hasNewContent && !result.upToDate;
+            
+            if (media.category.includes('series')) {
+                if (result.latestSeason && typeof result.latestSeason === 'number') {
+                    while (media.seasons.length < result.latestSeason) {
+                        media.seasons.push({ number: media.seasons.length + 1, watched: 0, total: 0 });
+                    }
+                    if (result.latestEpisodes && media.seasons.length > 0) {
+                        const targetSeason = media.seasons[result.latestSeason - 1];
+                        if (targetSeason) {
+                            targetSeason.total = Math.max(targetSeason.total || 0, result.latestEpisodes);
+                        }
+                    }
+                }
+            }
         }
     });
 
@@ -100,7 +114,7 @@ export function renderSyncScreen(library, syncResults) {
             <div class="sync-card-header">
                 ${posterHTML}
                 <div class="sync-card-info">
-                    <div class="sync-card-title">${media.title}</div>
+                    <div class="sync-card-title">${escapeHTML(media.title)}</div>
                     <div class="sync-card-meta">${CAT_LABELS[media.category]} · ${STATUS_LABELS[media.status] || media.status}</div>
                 </div>
                 ${hasNew
@@ -111,12 +125,12 @@ export function renderSyncScreen(library, syncResults) {
         if (result) {
             const resultDiv = document.createElement('div');
             resultDiv.className = `sync-result ${hasNew ? 'has-new' : 'up-to-date'}`;
-            let content = `<strong style="color:var(--text)">${result.latestStatus}</strong>`;
+            let content = `<strong style="color:var(--text)">${escapeHTML(result.latestStatus)}</strong>`;
             if (hasNew && result.newContentSummary) {
-                content += `<br><span style="color:var(--accent);">▶ ${result.newContentSummary}</span>`;
+                content += `<br><span style="color:var(--accent);">▶ ${escapeHTML(result.newContentSummary)}</span>`;
             }
             if (result.latestSeason) {
-                content += `<br><span style="color:var(--text-muted);">Latest: Season ${result.latestSeason}${result.latestEpisodes ? ', ' + result.latestEpisodes + ' episodes' : ''}</span>`;
+                content += `<br><span style="color:var(--text-muted);">Latest: Season ${escapeHTML(result.latestSeason)}${result.latestEpisodes ? ', ' + escapeHTML(result.latestEpisodes) + ' episodes' : ''}</span>`;
             }
             resultDiv.innerHTML = content;
             card.appendChild(resultDiv);

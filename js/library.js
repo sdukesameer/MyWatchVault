@@ -14,11 +14,28 @@ export function saveLibrary(lib) {
 }
 
 export function loadSyncResults() {
-    try { return JSON.parse(localStorage.getItem(SYNC_KEY) || '{}'); } catch { return {}; }
+    try { 
+        const res = JSON.parse(localStorage.getItem(SYNC_KEY) || '{}');
+        // Migrate old _meta out if it exists
+        if (res._meta) {
+            saveSyncMeta(res._meta);
+            delete res._meta;
+            saveSyncResults(res);
+        }
+        return res;
+    } catch { return {}; }
 }
 
 export function saveSyncResults(results) {
     try { localStorage.setItem(SYNC_KEY, JSON.stringify(results)); } catch {}
+}
+
+export function loadSyncMeta() {
+    try { return JSON.parse(localStorage.getItem(SYNC_KEY + '_meta') || '{}'); } catch { return {}; }
+}
+
+export function saveSyncMeta(meta) {
+    try { localStorage.setItem(SYNC_KEY + '_meta', JSON.stringify(meta)); } catch {}
 }
 
 export function uid() {
@@ -128,7 +145,7 @@ export function getStats(lib, syncResults) {
 }
 
 export function exportLibrary(lib, syncResults) {
-    const data = { library: lib, syncResults, exportDate: new Date().toISOString() };
+    const data = { library: lib, syncResults, syncMeta: loadSyncMeta(), exportDate: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -142,12 +159,29 @@ export function importLibrary(jsonString) {
     try {
         const data = JSON.parse(jsonString);
         if (!data.library || !Array.isArray(data.library)) {
-            throw new Error("Invalid backup format");
+            throw new Error("Invalid backup format: missing library array");
         }
+        
+        const validCategories = ['anime-series', 'anime-movie', 'series', 'movie'];
+        const validStatuses = ['watching', 'completed', 'plan-to-watch', 'on-hold', 'dropped'];
+        
+        data.library.forEach((item, index) => {
+            if (!item.id || !item.title) throw new Error(`Item at index ${index} missing id or title`);
+            if (!validCategories.includes(item.category)) throw new Error(`Invalid category "${item.category}" for "${item.title}"`);
+            if (!validStatuses.includes(item.status)) item.status = 'plan-to-watch';
+            if (!Array.isArray(item.seasons)) item.seasons = [];
+        });
+
         // Basic merge (replace all)
         saveLibrary(data.library);
-        if (data.syncResults) saveSyncResults(data.syncResults);
-        return { success: true, count: data.library.length, library: data.library, syncResults: data.syncResults || {} };
+        
+        const sr = data.syncResults || {};
+        delete sr._meta; // Ensure no old meta sneaks in
+        saveSyncResults(sr);
+        
+        if (data.syncMeta) saveSyncMeta(data.syncMeta);
+        
+        return { success: true, count: data.library.length, library: data.library, syncResults: sr };
     } catch (e) {
         return { success: false, error: e.message };
     }

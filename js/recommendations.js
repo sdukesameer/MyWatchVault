@@ -2,7 +2,7 @@
 // AI Recommendation Engine
 
 import { callAI, extractJSON } from './api.js';
-import { CAT_LABELS, CAT_EMOJI } from './ui.js';
+import { CAT_LABELS, CAT_EMOJI, escapeHTML } from './ui.js';
 
 export async function fetchRecommendations(library, config) {
     if (library.length < 2) {
@@ -50,8 +50,8 @@ export function renderRecommendations(recos, library, onQuickAdd) {
                 <div class="card-badge ${item.category?.split('-')[0]}" style="bottom:8px;left:8px;top:auto;">${CAT_LABELS[item.category] || ''}</div>
             </div>
             <div class="reco-body">
-                <div class="reco-title">${item.title} <span style="font-size:11px;color:var(--text-muted);">${item.year || ''}</span></div>
-                <div class="reco-why">🎯 ${item.whyYouLikeIt || item.description || ''}</div>
+                <div class="reco-title">${escapeHTML(item.title)} <span style="font-size:11px;color:var(--text-muted);">${escapeHTML(item.year || '')}</span></div>
+                <div class="reco-why">🎯 ${escapeHTML(item.whyYouLikeIt || item.description || '')}</div>
                 ${inLib
                     ? `<div style="margin-top:10px;font-size:12px;color:var(--success);">✓ Already in your vault</div>`
                     : `<button class="reco-add-btn" data-item='${JSON.stringify(item).replace(/'/g, "&apos;")}'>+ Add to Vault</button>`}

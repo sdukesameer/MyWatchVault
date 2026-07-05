@@ -20,7 +20,11 @@ const PROXY_TIMEOUT_MS = 9000;
 const REQUEST_TIMEOUT_MS = 25000;
 
 function isProxied() {
-    return window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    const hn = window.location.hostname;
+    if (hn === 'localhost' || hn === '127.0.0.1' || hn.startsWith('192.168.') || hn.startsWith('10.')) {
+        return false;
+    }
+    return true;
 }
 
 let lastProviderUsed = '';
