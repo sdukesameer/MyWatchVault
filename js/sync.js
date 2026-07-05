@@ -19,22 +19,44 @@ export async function runSync(library, config, onProgress) {
                 if (res.data) {
                     result = {
                         latestStatus: res.data.status,
-                        latestEpisodes: res.data.episodes,
+                        latestEpisodes: res.data.episodes || 0,
                         latestSeason: 1,
                         isOngoing: res.data.status === 'Currently Airing',
                         upToDate: false
                     };
+                    if (media.seasons.length > 0 && result.latestEpisodes) {
+                        media.seasons[0].total = result.latestEpisodes;
+                    }
                     const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
-                    if (res.data.episodes && totalWatched >= res.data.episodes) result.upToDate = true;
-                    if (res.data.status === 'Finished Airing' && totalWatched >= res.data.episodes) result.upToDate = true;
+                    if (result.latestEpisodes && totalWatched >= result.latestEpisodes) result.upToDate = true;
+                    if (res.data.status === 'Finished Airing' && totalWatched >= result.latestEpisodes) result.upToDate = true;
                 }
             } else if (media.tvmazeId) {
-                const res = await fetch(`https://api.tvmaze.com/shows/${media.tvmazeId}`).then(r=>r.json());
-                result = {
-                    latestStatus: res.status,
-                    isOngoing: res.status !== 'Ended',
-                    upToDate: false
-                };
+                const [showRes, seasonsRes] = await Promise.all([
+                    fetch(`https://api.tvmaze.com/shows/${media.tvmazeId}`).then(r=>r.json()),
+                    fetch(`https://api.tvmaze.com/shows/${media.tvmazeId}/seasons`).then(r=>r.json()).catch(()=>[])
+                ]);
+                
+                if (showRes && showRes.status) {
+                    result = {
+                        latestStatus: showRes.status,
+                        isOngoing: showRes.status !== 'Ended',
+                        upToDate: false
+                    };
+                    
+                    if (Array.isArray(seasonsRes) && seasonsRes.length > 0) {
+                        const validSeasons = seasonsRes.filter(s => s.number > 0);
+                        result.latestSeason = validSeasons.length;
+                        validSeasons.forEach(s => {
+                            let ms = media.seasons.find(ms => ms.number === s.number);
+                            if (ms) {
+                                ms.total = s.episodeOrder || ms.total;
+                            } else {
+                                media.seasons.push({ number: s.number, watched: 0, total: s.episodeOrder || 0 });
+                            }
+                        });
+                    }
+                }
             } else if (media.tmdbId) {
                 if (media.category === 'movie') {
                     const res = await (await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${config.tmdbKey || ''}`)).json().catch(()=>({}));
@@ -55,6 +77,12 @@ export async function runSync(library, config, onProgress) {
                             isOngoing: res.status === 'Returning Series',
                             upToDate: false
                         };
+                        
+                        if (res.number_of_seasons > media.seasons.length) {
+                            while(media.seasons.length < res.number_of_seasons) {
+                                media.seasons.push({ number: media.seasons.length + 1, watched: 0, total: 0 });
+                            }
+                        }
                     }
                 }
             }

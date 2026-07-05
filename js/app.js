@@ -17,8 +17,54 @@ const state = {
     filterStatus: 'all',
     filterGenre: 'all',
     filterRating: 'all',
-    searchCache: new Map()
+    filterRating: 'all',
+    searchCache: new Map(),
+    previewItem: null
 };
+
+const detailCache = new Map();
+function cacheSet(key, val) {
+    if (detailCache.size >= 20) {
+        detailCache.delete(detailCache.keys().next().value); // FIFO
+    }
+    detailCache.set(key, val);
+}
+
+async function fetchDeepDetails(item) {
+    const cacheKey = item.category + '_' + (item.jikanId || item.tvmazeId || item.tmdbId || item.title);
+    if (detailCache.has(cacheKey)) return detailCache.get(cacheKey);
+    
+    let seasons = [];
+    try {
+        if (item.category === 'anime-series' && item.jikanId) {
+            const res = await fetch(`https://api.jikan.moe/v4/anime/${item.jikanId}`);
+            if (res.ok) {
+                const data = await res.json();
+                const eps = data.data.episodes || 0;
+                seasons = [{ number: 1, watched: 0, total: eps }];
+            }
+        } else if (item.category === 'series' && item.tvmazeId) {
+            const res = await fetch(`https://api.tvmaze.com/shows/${item.tvmazeId}/seasons`);
+            if (res.ok) {
+                const data = await res.json();
+                seasons = data.filter(s => s.number > 0).map(s => ({
+                    number: s.number,
+                    watched: 0,
+                    total: s.episodeOrder || 0
+                }));
+            }
+        }
+    } catch (e) {
+        console.error("Deep fetch error", e);
+    }
+    
+    if ((item.category === 'series' || item.category === 'anime-series') && seasons.length === 0) {
+        seasons = [{ number: 1, watched: 0, total: 0 }];
+    }
+    
+    cacheSet(cacheKey, seasons);
+    return seasons;
+}
 
 // ── Environment Loading ──────────────────────────────────────────
 let ENV_KEYS = {};
@@ -240,28 +286,48 @@ async function searchTitles(query) {
                     : `<button class="search-item-add" tabindex="-1" data-title='${JSON.stringify(item).replace(/'/g, "&apos;")}'>+ Add</button>`}`;
 
             if (!inLib) {
-                const addHandler = async (e) => {
-                    e.stopPropagation();
-                    const btn = div.querySelector('.search-item-add');
-                    if (btn) {
-                        btn.textContent = 'Adding...';
-                        btn.disabled = true;
-                    }
-                    
-                    const media = lib.addMedia(state.library, item);
-                    ui.showToast(`"${media.title}" added to vault ✓`, 'success');
-                    dropdown.style.display = 'none';
-                    document.getElementById('search-input').value = '';
-                    render();
-                    ui.openDetailModal(media);
-                };
-                
-                div.addEventListener('mousedown', (e) => {
+                div.addEventListener('mousedown', async (e) => {
                     // Prevent mousedown from triggering blur on the input
                     e.preventDefault();
-                    addHandler(e);
+                    
+                    const isAddBtn = e.target.classList.contains('search-item-add');
+                    
+                    if (isAddBtn) {
+                        const btn = div.querySelector('.search-item-add');
+                        if (btn) {
+                            btn.textContent = 'Adding...';
+                            btn.disabled = true;
+                        }
+                        const seasons = await fetchDeepDetails(item);
+                        const media = lib.addMedia(state.library, { ...item, seasons });
+                        ui.showToast(`"${media.title}" added to vault ✓`, 'success');
+                        dropdown.style.display = 'none';
+                        document.getElementById('search-input').value = '';
+                        render();
+                    } else {
+                        // Open Preview Modal
+                        dropdown.style.display = 'none';
+                        document.getElementById('search-input').value = '';
+                        ui.showLoading('Fetching details...');
+                        const seasons = await fetchDeepDetails(item);
+                        ui.hideLoading();
+                        
+                        const previewItem = {
+                            ...item,
+                            id: 'preview_' + Date.now(),
+                            status: 'plan-to-watch',
+                            seasons: seasons,
+                            rating: 0,
+                            notes: '',
+                            addedAt: new Date().toISOString(),
+                            rewatchCount: 0,
+                            tags: []
+                        };
+                        state.previewItem = previewItem;
+                        ui.openDetailModal(previewItem);
+                    }
                 });
-                div.addEventListener('keydown', (e) => { if (e.key === 'Enter') addHandler(e); });
+                div.addEventListener('keydown', (e) => { if (e.key === 'Enter') div.dispatchEvent(new MouseEvent('mousedown')); });
             }
             dropdown.appendChild(div);
         });
@@ -300,10 +366,24 @@ async function handleFetchRecos() {
         ui.hideLoading();
         ui.showToast(`Found recos! (via ${getLastProvider()})`, 'success');
         
-        renderRecommendations(recos, state.library, (item) => {
-            lib.addMedia(state.library, item);
-            render();
-            ui.showToast(`"${item.title}" added!`, 'success');
+        renderRecommendations(recos, state.library, async (item) => {
+            ui.showLoading('Fetching details...');
+            const seasons = await fetchDeepDetails(item);
+            ui.hideLoading();
+            
+            const previewItem = {
+                ...item,
+                id: 'preview_' + Date.now(),
+                status: 'plan-to-watch',
+                seasons: seasons,
+                rating: 0,
+                notes: '',
+                addedAt: new Date().toISOString(),
+                rewatchCount: 0,
+                tags: []
+            };
+            state.previewItem = previewItem;
+            ui.openDetailModal(previewItem);
         });
     } catch (err) {
         ui.hideLoading();
@@ -423,12 +503,14 @@ function bindEvents() {
     // Detail Modal
     const checkDetailUnsaved = () => {
         const currentData = ui.collectDetailData();
+        if (currentData.id.startsWith('preview_')) return true; // Preview items are always unsaved if changed, or we can just say true
         const media = state.library.find(m => m.id === currentData.id);
         if (!media) return false;
         const seasonsMatch = JSON.stringify(currentData.seasons || []) === JSON.stringify(media.seasons || []);
         return currentData.status !== media.status || 
                currentData.rating !== (media.rating || 0) || 
                currentData.notes !== (media.notes || '') || 
+               currentData.tags.join(',') !== (media.tags || []).join(',') ||
                !seasonsMatch;
     };
 
@@ -459,17 +541,32 @@ function bindEvents() {
 
     document.getElementById('detail-save-btn').addEventListener('click', () => {
         const data = ui.collectDetailData();
-        if (lib.updateMedia(state.library, data.id, data)) {
+        if (data.id.startsWith('preview_')) {
+            const fullItem = { ...state.previewItem, ...data };
+            delete fullItem.id; // Let lib.addMedia generate a real ID
+            lib.addMedia(state.library, fullItem);
+            state.previewItem = null;
             ui.closeModal('detail-modal');
             render();
-            ui.showToast('Saved ✓', 'success');
+            ui.showToast('Added to vault ✓', 'success');
+        } else {
+            if (lib.updateMedia(state.library, data.id, data)) {
+                ui.closeModal('detail-modal');
+                render();
+                ui.showToast('Saved ✓', 'success');
+            }
         }
     });
 
     document.getElementById('detail-delete-btn').addEventListener('click', () => {
         const data = ui.collectDetailData();
+        if (data.id.startsWith('preview_')) {
+            // It's a preview item, delete just means cancel
+            ui.closeModal('detail-modal');
+            return;
+        }
+
         const media = state.library.find(m => m.id === data.id);
-        
         ui.renderConfirmModal(
             'Remove Title', 
             `Are you sure you want to remove "${media?.title}" from your vault?`, 

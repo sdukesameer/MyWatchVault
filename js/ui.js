@@ -197,6 +197,10 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
 export function openDetailModal(media) {
     editingId = media.id;
 
+    const isPreview = media.id.startsWith('preview_');
+    document.getElementById('detail-save-btn').textContent = isPreview ? 'Add to Vault' : 'Save Changes';
+    document.getElementById('detail-delete-btn').style.display = isPreview ? 'none' : 'block';
+
     document.getElementById('detail-title').textContent = media.title;
     document.getElementById('detail-subtitle').textContent = `${CAT_LABELS[media.category] || ''} · ${media.year || 'Year unknown'}`;
 

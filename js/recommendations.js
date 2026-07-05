@@ -23,13 +23,46 @@ Top rated / completed: ${liked || 'none yet'}
 All tracked: ${allTitles}
 Preferred categories: ${cats}
 
-Recommend 8 titles they would love that are NOT in their list.
+Recommend 5 titles they would love that are NOT in their list.
 Return JSON array:
 [{ "title": "...", "year": 2023, "category": "anime-series|anime-movie|series|movie", "genre": "...", "description": "1-2 sentences about the show", "whyYouLikeIt": "Specific reason based on their taste (1 sentence)" }]
 ONLY valid JSON array, no markdown.`;
 
     const text = await callAI(prompt, config);
-    return extractJSON(text);
+    const recos = extractJSON(text) || [];
+    
+    // Enhance with real API data for posters and IDs
+    const enhanced = await Promise.all(recos.map(async (item) => {
+        try {
+            if (item.category.startsWith('anime')) {
+                const res = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`).then(r=>r.json());
+                if (res.data?.[0]) {
+                    const match = res.data[0];
+                    item.poster = match.images?.jpg?.large_image_url || match.images?.jpg?.image_url;
+                    item.jikanId = match.mal_id;
+                    item.year = match.year || item.year;
+                }
+            } else if (item.category === 'series') {
+                const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`).then(r=>r.json());
+                if (res?.[0]?.show) {
+                    const match = res[0].show;
+                    item.poster = match.image?.original || match.image?.medium;
+                    item.tvmazeId = match.id;
+                }
+            } else if (item.category === 'movie') {
+                const res = await import('./api.js').then(m => m.callTMDB('search-movie', { query: item.title }, config));
+                if (res?.results?.[0]) {
+                    const match = res.results[0];
+                    item.poster = match.poster_path ? 'https://image.tmdb.org/t/p/w500' + match.poster_path : null;
+                    item.tmdbId = match.id;
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to enhance reco:", item.title);
+        }
+        return item;
+    }));
+    return enhanced;
 }
 
 export function renderRecommendations(recos, library, onQuickAdd) {
@@ -43,30 +76,44 @@ export function renderRecommendations(recos, library, onQuickAdd) {
     recos.forEach(item => {
         const inLib = library.some(m => m.title.toLowerCase() === item.title.toLowerCase());
         const card = document.createElement('div');
-        card.className = 'reco-card';
+        card.className = 'media-card'; // Use media-card class so it shares the grid styling
+        
+        const escapedTitle = escapeHTML(item.title);
+        const posterHTML = item.poster
+            ? `<img src="${escapeHTML(item.poster)}" alt="${escapedTitle}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            : '';
+        const placeholderStyle = item.poster ? 'style="display:none"' : '';
+
         card.innerHTML = `
-            <div class="reco-poster">
-                <div class="reco-poster-placeholder">${CAT_EMOJI[item.category] || '🎬'}</div>
-                <div class="card-badge ${item.category?.split('-')[0]}" style="bottom:8px;left:8px;top:auto;">${CAT_LABELS[item.category] || ''}</div>
+            <div class="card-poster">
+                ${posterHTML}
+                <div class="card-poster-placeholder" ${placeholderStyle}>
+                    <span>${CAT_EMOJI[item.category] || '🎬'}</span>
+                    <span>${escapedTitle.slice(0, 18)}</span>
+                </div>
+                <div class="card-badge ${item.category?.split('-')[0]}">${CAT_LABELS[item.category] || 'Unknown'}</div>
             </div>
-            <div class="reco-body">
-                <div class="reco-title">${escapeHTML(item.title)} <span style="font-size:11px;color:var(--text-muted);">${escapeHTML(item.year || '')}</span></div>
-                <div class="reco-why">🎯 ${escapeHTML(item.whyYouLikeIt || item.description || '')}</div>
-                ${inLib
-                    ? `<div style="margin-top:10px;font-size:12px;color:var(--success);">✓ Already in your vault</div>`
-                    : `<button class="reco-add-btn" data-item='${JSON.stringify(item).replace(/'/g, "&apos;")}'>+ Add to Vault</button>`}
+            <div class="card-body">
+                <div class="card-title" title="${escapedTitle}">${escapedTitle}</div>
+                <div class="card-meta">
+                    ${item.year ? `<span>${escapeHTML(item.year.toString())}</span>` : ''}
+                    ${item.genre ? `<span>${escapeHTML(item.genre.split(',')[0])}</span>` : ''}
+                </div>
+                <div style="font-size:11px;color:var(--text-dim);margin-top:6px;font-style:italic;">
+                    🎯 ${escapeHTML(item.whyYouLikeIt || item.description || '')}
+                </div>
+                ${inLib 
+                    ? `<div style="margin-top:10px;font-size:11px;color:var(--success);font-weight:600;">✓ In Vault</div>`
+                    : `<button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;" data-item='${JSON.stringify(item).replace(/'/g, "&apos;")}'>Preview</button>`
+                }
             </div>`;
 
-        const btn = card.querySelector('.reco-add-btn');
-        if (btn) {
-            btn.addEventListener('click', e => {
-                const data = JSON.parse(e.target.dataset.item);
-                onQuickAdd(data);
-                e.target.textContent = '✓ Added!';
-                e.target.style.color = 'var(--success)';
-                e.target.disabled = true;
-            });
-        }
+        card.tabIndex = 0;
+        card.addEventListener('click', (e) => {
+            if (inLib) return;
+            onQuickAdd(item); // Note: we'll rename the callback usage in app.js
+        });
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inLib) onQuickAdd(item); });
         grid.appendChild(card);
     });
 }
