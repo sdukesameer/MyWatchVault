@@ -40,7 +40,7 @@ async function fetchDeepDetails(item) {
     let attempts = 0;
     while (attempts < 3) {
         try {
-            if (item.category === 'anime-series') {
+            if (item.category === 'anime-series' || item.category === 'anime') {
                 let jId = item.jikanId;
                 if (!jId) {
                     const searchRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`);
@@ -60,16 +60,27 @@ async function fetchDeepDetails(item) {
                         break;
                     }
                 }
-            } else if (item.category === 'series' && item.tvmazeId) {
-                const res = await fetch(`https://api.tvmaze.com/shows/${item.tvmazeId}/seasons`);
-                if (res.ok) {
-                    const data = await res.json();
-                    seasons = data.filter(s => s.number > 0).map(s => ({
-                        number: s.number,
-                        watched: 0,
-                        total: s.episodeOrder || 0
-                    }));
-                    break;
+            } else if (item.category === 'series') {
+                let tvId = item.tvmazeId;
+                if (!tvId) {
+                    const searchRes = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`);
+                    if (searchRes.ok) {
+                        const sData = await searchRes.json();
+                        if (sData?.[0]?.show) tvId = sData[0].show.id;
+                    }
+                }
+                if (tvId) {
+                    const res = await fetch(`https://api.tvmaze.com/shows/${tvId}/seasons`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        seasons = data.filter(s => s.number > 0).map(s => ({
+                            number: s.number,
+                            watched: 0,
+                            total: s.episodeOrder || 0
+                        }));
+                        item.tvmazeId = tvId; // save it
+                        break;
+                    }
                 }
             } else {
                 break; // Not a supported category for deep fetch
@@ -391,7 +402,27 @@ function bindEvents() {
         
         ui.closeModal('add-modal');
         render();
-        showToast(`"${title}" added ✓`, 'success');
+        showToast('Added! Fetching poster...', 'info');
+
+        // Async poster fetch
+        setTimeout(async () => {
+            try {
+                const endpoint = category.includes('movie') ? 'search-movie' : 'search-tv';
+                const searchData = await callTMDB(endpoint, { query: title }, state.config);
+                if (searchData && searchData.results && searchData.results.length > 0) {
+                    const best = searchData.results[0];
+                    if (best.poster_path) {
+                        const posterUrl = `https://image.tmdb.org/t/p/w500${best.poster_path}`;
+                        const updated = { poster: posterUrl, tmdbId: best.id };
+                        if (best.vote_average) updated.globalRating = `${best.vote_average.toFixed(1)} ★`;
+                        lib.updateMedia(state.library, media.id, updated);
+                        render();
+                    }
+                }
+            } catch (err) {
+                console.warn('Failed to fetch poster for manual add:', err);
+            }
+        }, 100);
         ['add-title','add-year','add-genre'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('add-category').value = '';
         document.getElementById('add-status').value = 'plan-to-watch';
@@ -425,6 +456,7 @@ function bindEvents() {
         
         const seasonsMatch = JSON.stringify(currentSeasonsNorm) === JSON.stringify(mediaSeasonsNorm);
         return currentData.status !== media.status || 
+               currentData.category !== media.category ||
                currentData.notes !== (media.notes || '') || 
                currentData.tags.join(',') !== (media.tags || []).join(',') ||
                currentData.rewatchCount !== (media.rewatchCount || 0) ||

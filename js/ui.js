@@ -254,6 +254,11 @@ export function openDetailModal(media) {
         });
     });
 
+    const catSelect = document.getElementById('detail-category');
+    catSelect.innerHTML = Object.entries(CAT_LABELS).map(([k, v]) => 
+        `<option value="${k}" ${media.category === k ? 'selected' : ''}>${escapeHTML(v)}</option>`
+    ).join('');
+
     document.getElementById('detail-global-rating').textContent = media.globalRating || '—';
     
     document.getElementById('detail-tags').value = (media.tags || []).join(', ');
@@ -388,6 +393,7 @@ export function collectDetailData() {
 
     return {
         id: editingId,
+        category: document.getElementById('detail-category').value || 'movie',
         status: document.querySelector('#status-selector .status-opt.active')?.dataset.status || 'plan-to-watch',
         notes: document.getElementById('detail-notes').value,
         tags: tags,

@@ -203,9 +203,17 @@
                             <button class="btn btn-secondary btn-sm" id="rewatch-btn">+ Log Rewatch</button>
                         </div>
                     </div>
-                    <div>
-                        <div class="field-label">Global Rating</div>
-                        <div id="detail-global-rating" style="font-size: 16px; font-weight: 600; color: var(--accent);">—</div>
+                    <div style="display:flex;gap:15px;align-items:center;margin-bottom:15px;">
+                        <div>
+                            <div class="field-label">Global Rating</div>
+                            <div id="detail-global-rating" style="font-size: 16px; font-weight: 600; color: var(--accent);">—</div>
+                        </div>
+                        <div style="flex:1">
+                            <div class="field-label">Category</div>
+                            <select id="detail-category" class="input-field" style="padding: 6px; font-size: 13px; height: auto;">
+                                <!-- Populated by JS -->
+                            </select>
+                        </div>
                     </div>
                     <div>
                         <label class="field-label">Tags (comma-separated)</label>
