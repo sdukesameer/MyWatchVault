@@ -15,6 +15,8 @@ const state = {
     currentCat: 'all',
     sortBy: 'recently-added',
     filterStatus: 'all',
+    filterGenre: 'all',
+    filterRating: 'all',
     searchCache: new Map()
 };
 
@@ -46,6 +48,19 @@ function render() {
     const stats = lib.getStats(state.library, state.syncResults);
     ui.renderStats(stats);
     
+    // Dynamically populate genre filter
+    const genreSelect = document.getElementById('genre-filter');
+    const currentGenre = genreSelect.value;
+    const allGenres = new Set();
+    state.library.forEach(m => {
+        if (m.genre) m.genre.split(',').forEach(g => allGenres.add(g.trim()));
+    });
+    const sortedGenres = Array.from(allGenres).sort();
+    genreSelect.innerHTML = `<option value="all">All Genres</option>` + 
+        sortedGenres.map(g => `<option value="${escapeHTML(g)}">${escapeHTML(g)}</option>`).join('');
+    genreSelect.value = sortedGenres.includes(currentGenre) ? currentGenre : 'all';
+    state.filterGenre = genreSelect.value;
+    
     const watching = state.library.filter(m => m.status === 'watching');
     watching.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
     const continueItem = watching.length > 0 ? watching[0] : null;
@@ -65,7 +80,7 @@ function render() {
 
     ui.renderDashboardWidgets(continueItem, upcoming, openDetail);
     
-    const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.sortBy);
+    const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy);
     ui.renderGrid(filtered, state.syncResults, state.currentCat, openDetail);
 }
 
@@ -241,7 +256,11 @@ async function searchTitles(query) {
                     ui.openDetailModal(media);
                 };
                 
-                div.addEventListener('click', addHandler);
+                div.addEventListener('mousedown', (e) => {
+                    // Prevent mousedown from triggering blur on the input
+                    e.preventDefault();
+                    addHandler(e);
+                });
                 div.addEventListener('keydown', (e) => { if (e.key === 'Enter') addHandler(e); });
             }
             dropdown.appendChild(div);
@@ -333,6 +352,25 @@ function bindEvents() {
     document.getElementById('status-filter').addEventListener('change', (e) => {
         state.filterStatus = e.target.value;
         render();
+    });
+    document.getElementById('genre-filter').addEventListener('change', (e) => {
+        state.filterGenre = e.target.value;
+        render();
+    });
+    document.getElementById('rating-filter').addEventListener('change', (e) => {
+        state.filterRating = e.target.value;
+        render();
+    });
+
+    // Random Picker
+    document.getElementById('random-picker-btn').addEventListener('click', () => {
+        const pool = state.library.filter(m => m.status === 'plan-to-watch' || m.status === 'on-hold');
+        if (pool.length === 0) {
+            ui.showToast("Your Plan to Watch list is empty!", "info");
+            return;
+        }
+        const randomItem = pool[Math.floor(Math.random() * pool.length)];
+        ui.openDetailModal(randomItem);
     });
 
     // Search

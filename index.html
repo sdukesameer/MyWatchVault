@@ -117,11 +117,21 @@
                 <option value="on-hold">⏸ On Hold</option>
                 <option value="dropped">✗ Dropped</option>
             </select>
+            <select id="genre-filter" class="input-field" style="width: auto;">
+                <option value="all">All Genres</option>
+            </select>
+            <select id="rating-filter" class="input-field" style="width: auto;">
+                <option value="all">All Ratings</option>
+                <option value="5">★★★★★ (5 Stars)</option>
+                <option value="4+">★★★★+ (4+ Stars)</option>
+                <option value="3+">★★★+ (3+ Stars)</option>
+            </select>
         </div>
 
         <!-- Add Bar -->
         <div class="add-bar" id="add-bar-wrap">
             <input class="input-field" type="text" id="search-input" placeholder="🔍  Search and add anime, movies, series…" autocomplete="off">
+            <button class="btn btn-secondary" id="random-picker-btn">🎲 Pick For Me</button>
             <button class="btn btn-primary" id="manual-add-btn">＋ Add Manually</button>
             <div id="search-dropdown" class="search-dropdown" style="display:none;"></div>
         </div>
@@ -178,13 +188,23 @@
                 <div class="detail-info">
                     <div class="detail-meta-row" id="detail-meta"></div>
                     <div class="detail-desc" id="detail-desc"></div>
-                    <div>
-                        <div class="field-label">Your Status</div>
-                        <div class="status-selector" id="status-selector"></div>
+                    <div style="display:flex;gap:12px;align-items:center;">
+                        <div style="flex:1">
+                            <div class="field-label">Your Status</div>
+                            <div class="status-selector" id="status-selector"></div>
+                        </div>
+                        <div id="rewatch-container" style="display:none;align-items:center;gap:10px;">
+                            <div style="font-size:12px;color:var(--text-dim);font-weight:600;">Rewatched: <span id="rewatch-count" style="color:var(--accent);font-size:14px;">0</span></div>
+                            <button class="btn btn-secondary btn-sm" id="rewatch-btn">+ Log Rewatch</button>
+                        </div>
                     </div>
                     <div>
                         <div class="field-label">Your Rating</div>
                         <div class="rating-stars" id="rating-stars"></div>
+                    </div>
+                    <div>
+                        <label class="field-label">Tags (comma-separated)</label>
+                        <input type="text" id="detail-tags" class="input-field" placeholder="comfort, masterpiece, to-watch-with-wife...">
                     </div>
                     <div>
                         <label class="field-label">Notes</label>

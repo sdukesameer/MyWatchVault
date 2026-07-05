@@ -63,6 +63,8 @@ export function addMedia(lib, item) {
         poster: item.poster || null,
         addedAt: new Date().toISOString(),
         hasNew: false,
+        rewatchCount: item.rewatchCount || 0,
+        tags: item.tags || [],
         jikanId: item.jikanId || null,
         tvmazeId: item.tvmazeId || null,
         tmdbId: item.tmdbId || null
@@ -99,7 +101,7 @@ export function removeMedia(lib, syncResults, id) {
     return false;
 }
 
-export function getFilteredLibrary(lib, cat, statusFilter, sortBy) {
+export function getFilteredLibrary(lib, cat, statusFilter, genreFilter, ratingFilter, sortBy) {
     let filtered = lib;
     
     // Category filter
@@ -110,6 +112,22 @@ export function getFilteredLibrary(lib, cat, statusFilter, sortBy) {
     // Status filter
     if (statusFilter && statusFilter !== 'all') {
         filtered = filtered.filter(m => m.status === statusFilter);
+    }
+
+    // Genre filter
+    if (genreFilter && genreFilter !== 'all') {
+        filtered = filtered.filter(m => m.genre && m.genre.toLowerCase().includes(genreFilter.toLowerCase()));
+    }
+
+    // Rating filter
+    if (ratingFilter && ratingFilter !== 'all') {
+        if (ratingFilter === '5') {
+            filtered = filtered.filter(m => m.rating === 5);
+        } else if (ratingFilter === '4+') {
+            filtered = filtered.filter(m => m.rating >= 4);
+        } else if (ratingFilter === '3+') {
+            filtered = filtered.filter(m => m.rating >= 3);
+        }
     }
     
     // Sorting

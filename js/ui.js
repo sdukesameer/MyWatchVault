@@ -159,6 +159,13 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
         const statusDotClass = hasNew ? 'new-available' : (STATUS_DOT_CLASS[media.status] || 'not-started');
         const newBadge = hasNew ? `<div class="card-new-badge">🆕 NEW CONTENT</div>` : '';
 
+        const tagsHTML = media.tags?.length
+            ? `<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">
+                ${media.tags.slice(0, 2).map(t => `<span style="font-size:9px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px;color:var(--text-dim)">#${escapeHTML(t)}</span>`).join('')}
+                ${media.tags.length > 2 ? `<span style="font-size:9px;color:var(--text-muted);align-self:center;">+${media.tags.length - 2}</span>` : ''}
+               </div>`
+            : '';
+
         card.innerHTML = `
             <div class="card-poster">
                 ${posterHTML}
@@ -178,6 +185,7 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
                     ${media.rating ? `<span>⭐ ${media.rating}/5</span>` : ''}
                 </div>
                 ${progressHTML}
+                ${tagsHTML}
             </div>`;
 
         card.addEventListener('click', () => onCardClick(media.id));
@@ -215,10 +223,34 @@ export function openDetailModal(media) {
             ${STATUS_LABELS[s]}
         </span>`).join('');
         
+    const rewatchWrap = document.getElementById('rewatch-container');
+    const rewatchCountEl = document.getElementById('rewatch-count');
+    const rewatchBtn = document.getElementById('rewatch-btn');
+    let currentRewatch = media.rewatchCount || 0;
+    
+    const updateRewatchUI = (status) => {
+        if (status === 'completed') {
+            rewatchWrap.style.display = 'flex';
+            rewatchCountEl.textContent = currentRewatch;
+        } else {
+            rewatchWrap.style.display = 'none';
+        }
+    };
+    updateRewatchUI(media.status);
+
+    // Remove old listeners to avoid multiple fires if reopened
+    const newRewatchBtn = rewatchBtn.cloneNode(true);
+    rewatchBtn.parentNode.replaceChild(newRewatchBtn, rewatchBtn);
+    newRewatchBtn.addEventListener('click', () => {
+        currentRewatch++;
+        document.getElementById('rewatch-count').textContent = currentRewatch;
+    });
+
     ssEl.querySelectorAll('.status-opt').forEach(el => {
         el.addEventListener('click', () => {
             ssEl.querySelectorAll('.status-opt').forEach(o => o.classList.remove('active'));
             el.classList.add('active');
+            updateRewatchUI(el.dataset.status);
         });
     });
 
@@ -236,6 +268,7 @@ export function openDetailModal(media) {
         });
     });
 
+    document.getElementById('detail-tags').value = (media.tags || []).join(', ');
     document.getElementById('detail-notes').value = media.notes || '';
 
     const trackerSection = document.getElementById('tracker-section');
@@ -299,11 +332,17 @@ function updateSeasonStatus(row) {
 }
 
 export function collectDetailData() {
+    const rawTags = document.getElementById('detail-tags').value;
+    const tags = rawTags.split(',').map(t => t.trim().toLowerCase().replace(/[^a-z0-9\-]/g, '')).filter(t => t.length > 0);
+    const rewatchText = document.getElementById('rewatch-count').textContent;
+
     return {
         id: editingId,
         status: document.querySelector('#status-selector .status-opt.active')?.dataset.status || 'plan-to-watch',
         rating: document.querySelectorAll('#rating-stars .star.filled').length,
         notes: document.getElementById('detail-notes').value,
+        tags: tags,
+        rewatchCount: parseInt(rewatchText) || 0,
         seasons: Array.from(document.querySelectorAll('#seasons-grid .season-row')).map((row, idx) => {
             const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
             return {
