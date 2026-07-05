@@ -78,7 +78,7 @@ ONLY valid JSON array, no markdown.`;
     return enhanced;
 }
 
-export function renderRecommendations(items, library, onQuickAdd) {
+export function renderRecommendations(items, library, onQuickAdd, onOpenDetail) {
     const grid = document.getElementById('reco-grid');
     if (!grid) return;
     
@@ -114,22 +114,36 @@ export function renderRecommendations(items, library, onQuickAdd) {
                 <div class="card-meta">
                     ${item.year ? `<span>${escapeHTML(item.year.toString())}</span>` : ''}
                     ${item.genre ? `<span>${escapeHTML(item.genre.split(',')[0])}</span>` : ''}
+                    ${item.globalRating ? `<span title="Global Rating">🌐 ${escapeHTML(item.globalRating)}</span>` : ''}
                 </div>
                 <div style="font-size:11px;color:var(--text-dim);margin-top:6px;font-style:italic;">
                     🎯 ${escapeHTML(item.whyYouLikeIt || item.description || '')}
                 </div>
                 ${inLib 
-                    ? `<div style="margin-top:10px;font-size:11px;color:var(--success);font-weight:600;">✓ In Vault</div>`
-                    : `<button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;" data-item='${JSON.stringify(item).replace(/'/g, "&apos;")}'>Preview</button>`
+                    ? `<button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;color:var(--success);border-color:var(--success);width:100%;">✓ In Vault</button>`
+                    : `<button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;width:100%;" data-item='${JSON.stringify(item).replace(/'/g, "&apos;")}'>Preview</button>`
                 }
             </div>`;
 
         card.tabIndex = 0;
         card.addEventListener('click', (e) => {
-            if (inLib) return;
-            onQuickAdd(item); // Note: we'll rename the callback usage in app.js
+            if (inLib) {
+                const vaultItem = library.find(m => m.title.toLowerCase() === item.title.toLowerCase());
+                if (vaultItem && onOpenDetail) onOpenDetail(vaultItem.id);
+            } else {
+                onQuickAdd(item);
+            }
         });
-        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inLib) onQuickAdd(item); });
+        card.addEventListener('keydown', (e) => { 
+            if (e.key === 'Enter') {
+                if (inLib) {
+                    const vaultItem = library.find(m => m.title.toLowerCase() === item.title.toLowerCase());
+                    if (vaultItem && onOpenDetail) onOpenDetail(vaultItem.id);
+                } else {
+                    onQuickAdd(item);
+                }
+            } 
+        });
         grid.appendChild(card);
     });
 }

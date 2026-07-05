@@ -48,17 +48,15 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
             }
             
             const posterHTML = continueItem.poster 
-                ? `<img src="${continueItem.poster}" class="continue-poster">` 
-                : `<div class="continue-poster" style="display:flex;align-items:center;justify-content:center;font-size:40px;border:1px solid var(--border)">${CAT_EMOJI[continueItem.category]||'🎬'}</div>`;
+                ? `<img src="${escapeHTML(continueItem.poster)}" alt="Poster" style="width:80px;height:120px;object-fit:cover;border-radius:8px;flex-shrink:0;box-shadow:0 4px 10px rgba(0,0,0,0.2);">`
+                : `<div style="width:80px;height:120px;background:rgba(255,255,255,0.05);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:32px;">${CAT_EMOJI[continueItem.category] || '🎬'}</div>`;
 
             continueWrap.innerHTML = `
-                <div class="continue-card">
+                <div style="display:flex;gap:15px;align-items:center;">
                     ${posterHTML}
-                    <div class="continue-info">
-                        <div class="continue-title">${escapeHTML(continueItem.title)}</div>
-                        <div class="continue-meta">${CAT_LABELS[continueItem.category]} · ${continueItem.year || '?'}</div>
-                        <div class="continue-progress-text">${progressText}</div>
-                        <div class="continue-bar"><div class="continue-bar-fill" style="width:${progressPercent}%"></div></div>
+                    <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+                        <h3 style="margin:0 0 5px 0;font-size:18px;line-height:1.2;">${escapeHTML(continueItem.title)}</h3>
+                        <p style="margin:0 0 12px 0;font-size:13px;color:var(--text-muted)">Pick up where you left off.</p>
                         <button class="btn btn-primary btn-sm" id="dash-continue-btn" style="align-self:flex-start">Continue →</button>
                     </div>
                 </div>
@@ -159,9 +157,8 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
             <div class="card-body">
                 <div class="card-title" title="${escapedTitle}">${escapedTitle}</div>
                 <div class="card-meta">
-                    ${media.year ? `<span>${escapeHTML(media.year)}</span>` : ''}
+                    ${media.year ? `<span>${escapeHTML(media.year.toString())}</span>` : ''}
                     ${media.genre ? `<span>${escapeHTML(media.genre.split(',')[0])}</span>` : ''}
-                    ${media.rating ? `<span title="Your Rating">⭐ ${media.rating}/5</span>` : ''}
                     ${media.globalRating ? `<span title="Global Rating">🌐 ${escapeHTML(media.globalRating)}</span>` : ''}
                 </div>
                 ${progressHTML}
@@ -248,20 +245,8 @@ export function openDetailModal(media) {
         });
     });
 
-    const ratingEl = document.getElementById('rating-stars');
-    ratingEl.innerHTML = [1, 2, 3, 4, 5].map(n =>
-        `<span class="star ${(media.rating || 0) >= n ? 'filled' : 'empty'}" data-val="${n}">★</span>`
-    ).join('');
+    document.getElementById('detail-global-rating').textContent = media.globalRating || '—';
     
-    ratingEl.querySelectorAll('.star').forEach(star => {
-        star.addEventListener('click', () => {
-            const val = parseInt(star.dataset.val);
-            ratingEl.querySelectorAll('.star').forEach((s, i) => {
-                s.className = `star ${i < val ? 'filled' : 'empty'}`;
-            });
-        });
-    });
-
     document.getElementById('detail-tags').value = (media.tags || []).join(', ');
     document.getElementById('detail-notes').value = media.notes || '';
 
@@ -341,6 +326,48 @@ function updateSeasonStatus(row) {
     } else {
         statusEl.className = 'season-status not-started'; statusEl.textContent = 'Not started';
     }
+    
+    updateOverallStatusFromSeasons();
+}
+
+function updateOverallStatusFromSeasons() {
+    const rows = document.querySelectorAll('#seasons-grid .season-row');
+    if (rows.length === 0) return;
+    
+    let anyWatching = false;
+    let allCompleted = true;
+    
+    rows.forEach(row => {
+        const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
+        const w = parseInt(watchedInp.value) || 0;
+        const t = parseInt(totalInp.value) || 0;
+        
+        if (w > 0) anyWatching = true;
+        if (w === 0 || t === 0 || w < t) allCompleted = false;
+    });
+    
+    const ssEl = document.getElementById('status-selector');
+    if (!ssEl) return;
+    const opts = ssEl.querySelectorAll('.status-opt');
+    let targetStatus = null;
+    
+    if (allCompleted && rows.length > 0) {
+        targetStatus = 'completed';
+    } else if (anyWatching) {
+        targetStatus = 'watching';
+    }
+    
+    if (targetStatus) {
+        opts.forEach(o => o.classList.remove('active'));
+        const targetOpt = Array.from(opts).find(o => o.dataset.status === targetStatus);
+        if (targetOpt) {
+            targetOpt.classList.add('active');
+            const rewatchWrap = document.getElementById('rewatch-container');
+            if (rewatchWrap) {
+                rewatchWrap.style.display = targetStatus === 'completed' ? 'flex' : 'none';
+            }
+        }
+    }
 }
 
 export function collectDetailData() {
@@ -351,7 +378,6 @@ export function collectDetailData() {
     return {
         id: editingId,
         status: document.querySelector('#status-selector .status-opt.active')?.dataset.status || 'plan-to-watch',
-        rating: document.querySelectorAll('#rating-stars .star.filled').length,
         notes: document.getElementById('detail-notes').value,
         tags: tags,
         rewatchCount: parseInt(rewatchText) || 0,

@@ -117,6 +117,11 @@ function loadConfig() {
 }
 
 // ── Render Cycle ────────────────────────────────────────────────
+const openDetail = (id) => {
+    const media = state.library.find(m => m.id === id);
+    if (media) ui.openDetailModal(media);
+};
+
 function render() {
     const stats = getStats(state.library);
     ui.renderStats(stats);
@@ -135,11 +140,6 @@ function render() {
     state.filterGenre = genreSelect.value;
     const { continueItem, upcoming } = getDashboardItems(state.library);
 
-    const openDetail = (id) => {
-        const media = state.library.find(m => m.id === id);
-        if (media) ui.openDetailModal(media);
-    };
-
     ui.renderDashboardWidgets(continueItem, upcoming, openDetail);
     
     const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy);
@@ -147,7 +147,7 @@ function render() {
     
     // Re-render recommendations if they are loaded so that "✓ In Vault" updates
     if (allRecosLoaded.length > 0 && recoCallback) {
-        renderRecommendations(allRecosLoaded, state.library, recoCallback);
+        renderRecommendations(allRecosLoaded, state.library, recoCallback, openDetail);
     }
 }
 
@@ -253,7 +253,7 @@ async function handleFetchRecos(append = false) {
             ui.openDetailModal(previewItem);
         };
         
-        renderRecommendations(allRecosLoaded, state.library, recoCallback);
+        renderRecommendations(allRecosLoaded, state.library, recoCallback, openDetail);
         
         document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
     } catch (err) {
@@ -418,7 +418,6 @@ function bindEvents() {
         
         const seasonsMatch = JSON.stringify(currentSeasonsNorm) === JSON.stringify(mediaSeasonsNorm);
         return currentData.status !== media.status || 
-               currentData.rating !== (media.rating || 0) || 
                currentData.notes !== (media.notes || '') || 
                currentData.tags.join(',') !== (media.tags || []).join(',') ||
                currentData.rewatchCount !== (media.rewatchCount || 0) ||
