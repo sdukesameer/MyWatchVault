@@ -2,7 +2,8 @@
 // AI Recommendation Engine
 
 import { callAI, extractJSON } from './api.js';
-import { CAT_LABELS, CAT_EMOJI, escapeHTML } from './ui.js';
+import { CAT_LABELS, CAT_EMOJI } from './constants.js';
+import { escapeHTML } from './utils.js';
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 

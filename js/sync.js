@@ -1,8 +1,9 @@
 // js/sync.js
 // AI Sync Engine
 
-import { callAI, extractJSON } from './api.js';
-import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, escapeHTML } from './ui.js';
+import { callTMDB, getLastProvider, callAI, extractJSON } from './api.js';
+import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './constants.js';
+import { escapeHTML, showToast } from './utils.js';
 import { loadSyncMeta, normalizeTitle } from './library.js';
 
 export async function runSync(library, config, onProgress) {
