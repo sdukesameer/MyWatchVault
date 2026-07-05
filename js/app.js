@@ -359,16 +359,21 @@ async function handleRunSync() {
 }
 
 // ── Reco Handler ────────────────────────────────────────────────
-async function handleFetchRecos() {
+async function handleFetchRecos(append = false) {
     try {
-        ui.showLoading('Finding recommendations…', 'AI is analysing your taste profile');
+        ui.showLoading(append ? 'Loading more...' : 'Finding recommendations…', 'AI is analysing your taste profile');
+        const timeout = setTimeout(() => ui.hideLoading(), 15000); // 15s safety timeout
+        
         const recos = await fetchRecommendations(state.library, state.config);
+        clearTimeout(timeout);
         ui.hideLoading();
         ui.showToast(`Found recos! (via ${getLastProvider()})`, 'success');
         
         renderRecommendations(recos, state.library, async (item) => {
             ui.showLoading('Fetching details...');
+            const detailTimeout = setTimeout(() => ui.hideLoading(), 10000);
             const seasons = await fetchDeepDetails(item);
+            clearTimeout(detailTimeout);
             ui.hideLoading();
             
             const previewItem = {
@@ -384,7 +389,9 @@ async function handleFetchRecos() {
             };
             state.previewItem = previewItem;
             ui.openDetailModal(previewItem);
-        });
+        }, append);
+        
+        document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
     } catch (err) {
         ui.hideLoading();
         ui.showToast('Recommendations failed: ' + err.message, 'error');
@@ -407,6 +414,8 @@ function bindEvents() {
         ui.showScreen('screen-reco'); 
         handleFetchRecos(); 
     });
+    document.getElementById('refresh-reco-btn').addEventListener('click', () => handleFetchRecos(false));
+    document.getElementById('load-more-reco-btn').addEventListener('click', () => handleFetchRecos(true));
     document.getElementById('settings-btn').addEventListener('click', () => ui.openModal('settings-modal'));
     
     // Back buttons
@@ -503,10 +512,22 @@ function bindEvents() {
     // Detail Modal
     const checkDetailUnsaved = () => {
         const currentData = ui.collectDetailData();
-        if (currentData.id.startsWith('preview_')) return true; // Preview items are always unsaved if changed, or we can just say true
+        if (currentData.id.startsWith('preview_')) return true;
         const media = state.library.find(m => m.id === currentData.id);
         if (!media) return false;
-        const seasonsMatch = JSON.stringify(currentData.seasons || []) === JSON.stringify(media.seasons || []);
+        
+        const currentSeasonsNorm = (currentData.seasons || []).map(s => ({
+            number: parseInt(s.number) || 0,
+            watched: parseInt(s.watched) || 0,
+            total: parseInt(s.total) || 0
+        }));
+        const mediaSeasonsNorm = (media.seasons || []).map(s => ({
+            number: parseInt(s.number) || 0,
+            watched: parseInt(s.watched) || 0,
+            total: parseInt(s.total) || 0
+        }));
+        
+        const seasonsMatch = JSON.stringify(currentSeasonsNorm) === JSON.stringify(mediaSeasonsNorm);
         return currentData.status !== media.status || 
                currentData.rating !== (media.rating || 0) || 
                currentData.notes !== (media.notes || '') || 

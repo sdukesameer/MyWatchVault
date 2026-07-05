@@ -47,7 +47,10 @@ export async function runSync(library, config, onProgress) {
                     if (Array.isArray(seasonsRes) && seasonsRes.length > 0) {
                         const validSeasons = seasonsRes.filter(s => s.number > 0);
                         result.latestSeason = validSeasons.length;
+                        
+                        let totalAvailableEpisodes = 0;
                         validSeasons.forEach(s => {
+                            if (s.episodeOrder) totalAvailableEpisodes += s.episodeOrder;
                             let ms = media.seasons.find(ms => ms.number === s.number);
                             if (ms) {
                                 ms.total = s.episodeOrder || ms.total;
@@ -55,6 +58,14 @@ export async function runSync(library, config, onProgress) {
                                 media.seasons.push({ number: s.number, watched: 0, total: s.episodeOrder || 0 });
                             }
                         });
+                        
+                        const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
+                        if (totalAvailableEpisodes > 0 && totalWatched >= totalAvailableEpisodes) {
+                            result.upToDate = true;
+                        }
+                        if (showRes.status === 'Ended' && totalWatched >= totalAvailableEpisodes) {
+                            result.upToDate = true;
+                        }
                     }
                 }
             } else if (media.tmdbId) {
@@ -82,6 +93,11 @@ export async function runSync(library, config, onProgress) {
                             while(media.seasons.length < res.number_of_seasons) {
                                 media.seasons.push({ number: media.seasons.length + 1, watched: 0, total: 0 });
                             }
+                        }
+                        
+                        const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
+                        if (res.number_of_episodes && totalWatched >= res.number_of_episodes) {
+                            result.upToDate = true;
                         }
                     }
                 }

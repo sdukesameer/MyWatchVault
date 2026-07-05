@@ -255,6 +255,16 @@ export function openDetailModal(media) {
             ssEl.querySelectorAll('.status-opt').forEach(o => o.classList.remove('active'));
             el.classList.add('active');
             updateRewatchUI(el.dataset.status);
+            
+            if (el.dataset.status === 'completed') {
+                document.querySelectorAll('#seasons-grid .season-row').forEach(row => {
+                    const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
+                    if (totalInp.value && parseInt(totalInp.value) > 0) {
+                        watchedInp.value = totalInp.value;
+                    }
+                    updateSeasonStatus(row);
+                });
+            }
         });
     });
 
@@ -313,6 +323,24 @@ export function renderSeasons(seasons) {
         row.querySelectorAll('.ep-input').forEach(inp => {
             inp.addEventListener('input', () => updateSeasonStatus(row));
         });
+        
+        const statusSpan = row.querySelector('.season-status');
+        statusSpan.style.cursor = 'pointer';
+        statusSpan.title = 'Click to toggle completion';
+        statusSpan.addEventListener('click', () => {
+            const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
+            const w = parseInt(watchedInp.value) || 0;
+            const t = parseInt(totalInp.value) || 0;
+            if (w === t && t > 0) {
+                watchedInp.value = 0; // reset
+            } else if (t > 0) {
+                watchedInp.value = t; // complete
+            } else {
+                watchedInp.value = w + 1; // increment if total unknown
+            }
+            updateSeasonStatus(row);
+        });
+        
         row.querySelector('.season-delete').addEventListener('click', () => {
             row.remove();
         });
@@ -367,13 +395,22 @@ export function showToast(msg, type = 'info') {
     setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 400); }, 3200);
 }
 
-export function showLoading(text = 'Working on it…', sub = '') {
-    document.getElementById('loading-text').textContent = text;
+let _loadingTimeout = null;
+export function showLoading(msg, sub = '') {
+    const loader = document.getElementById('loading-overlay');
+    document.getElementById('loading-text').textContent = msg;
     document.getElementById('loading-sub').textContent = sub;
-    document.getElementById('loading-overlay').classList.remove('hidden');
+    loader.classList.remove('hidden');
+    
+    if (_loadingTimeout) clearTimeout(_loadingTimeout);
+    _loadingTimeout = setTimeout(() => {
+        hideLoading();
+        showToast('Operation timed out', 'error');
+    }, 15000);
 }
 
 export function hideLoading() {
+    if (_loadingTimeout) clearTimeout(_loadingTimeout);
     document.getElementById('loading-overlay').classList.add('hidden');
 }
 

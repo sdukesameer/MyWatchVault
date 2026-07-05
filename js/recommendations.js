@@ -4,6 +4,8 @@
 import { callAI, extractJSON } from './api.js';
 import { CAT_LABELS, CAT_EMOJI, escapeHTML } from './ui.js';
 
+const delay = ms => new Promise(res => setTimeout(res, ms));
+
 export async function fetchRecommendations(library, config) {
     if (library.length < 2) {
         throw new Error('Add more titles for better recommendations!');
@@ -31,10 +33,16 @@ ONLY valid JSON array, no markdown.`;
     const text = await callAI(prompt, config);
     const recos = extractJSON(text) || [];
     
-    // Enhance with real API data for posters and IDs
-    const enhanced = await Promise.all(recos.map(async (item) => {
+    // Enhance with real API data for posters and IDs sequentially to avoid rate limits
+    const enhanced = [];
+    for (const item of recos) {
         try {
+            // Normalize category if AI hallucinates it
+            if (item.category === 'anime') item.category = 'anime-series';
+            if (item.category === 'film') item.category = 'movie';
+
             if (item.category.startsWith('anime')) {
+                await delay(400); // Jikan 3 requests/sec limit
                 const res = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`).then(r=>r.json());
                 if (res.data?.[0]) {
                     const match = res.data[0];
@@ -60,19 +68,19 @@ ONLY valid JSON array, no markdown.`;
         } catch (e) {
             console.warn("Failed to enhance reco:", item.title);
         }
-        return item;
-    }));
+        enhanced.push(item);
+    }
     return enhanced;
 }
 
-export function renderRecommendations(recos, library, onQuickAdd) {
+export function renderRecommendations(recos, library, onQuickAdd, append = false) {
     const grid = document.getElementById('reco-grid');
-    if (!recos.length) {
+    if (!recos.length && !append) {
         grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="icon">🤔</div><h3>No recommendations yet</h3><p>Rate or complete some titles to get personalised picks.</p></div>`;
         return;
     }
     
-    grid.innerHTML = '';
+    if (!append) grid.innerHTML = '';
     recos.forEach(item => {
         const inLib = library.some(m => m.title.toLowerCase() === item.title.toLowerCase());
         const card = document.createElement('div');
