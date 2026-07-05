@@ -29,8 +29,8 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
             try {
                 results = [];
                 const [jikanRes, tvmazeRes, tmdbMovie, tmdbTv] = await Promise.allSettled([
-                    fetch(\`https://api.jikan.moe/v4/anime?q=\${encodeURIComponent(query)}&limit=3\`, { signal }).then(r=>r.json()),
-                    fetch(\`https://api.tvmaze.com/search/shows?q=\${encodeURIComponent(query)}\`, { signal }).then(r=>r.json()),
+                    fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=3`, { signal }).then(r=>r.json()),
+                    fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`, { signal }).then(r=>r.json()),
                     callTMDB('search-movie', { query }, state.config, signal),
                     callTMDB('search-tv', { query }, state.config, signal)
                 ]);
@@ -47,7 +47,7 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
                             description: (a.synopsis || '').slice(0, 150) + '...',
                             poster: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url,
                             jikanId: a.mal_id,
-                            globalRating: a.score ? \`\${a.score} ★\` : null
+                            globalRating: a.score ? `${a.score} ★` : null
                         });
                     });
                 }
@@ -63,7 +63,7 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
                             description: (s.summary || '').replace(/<[^>]*>?/gm, '').slice(0, 150) + '...',
                             poster: s.image?.original || s.image?.medium,
                             tvmazeId: s.id,
-                            globalRating: s.rating?.average ? \`\${s.rating.average} ★\` : null
+                            globalRating: s.rating?.average ? `${s.rating.average} ★` : null
                         });
                     });
                 }
@@ -76,9 +76,9 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
                             category: 'movie',
                             genre: 'Movie',
                             description: (m.overview || '').slice(0, 150) + '...',
-                            poster: m.poster_path ? \`https://image.tmdb.org/t/p/w500\${m.poster_path}\` : null,
+                            poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null,
                             tmdbId: m.id,
-                            globalRating: m.vote_average ? \`\${m.vote_average.toFixed(1)} ★\` : null
+                            globalRating: m.vote_average ? `${m.vote_average.toFixed(1)} ★` : null
                         });
                     });
                 }
@@ -91,9 +91,9 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
                             category: 'series',
                             genre: 'Series',
                             description: (s.overview || '').slice(0, 150) + '...',
-                            poster: s.poster_path ? \`https://image.tmdb.org/t/p/w500\${s.poster_path}\` : null,
+                            poster: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
                             tmdbId: s.id,
-                            globalRating: s.vote_average ? \`\${s.vote_average.toFixed(1)} ★\` : null
+                            globalRating: s.vote_average ? `${s.vote_average.toFixed(1)} ★` : null
                         });
                     });
                 }
@@ -104,7 +104,7 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
                 if (err.name === 'AbortError') return;
                 console.error("Search API failed", err);
                 if (!signal.aborted) {
-                    dropdown.innerHTML = \`<div style="padding:16px;color:var(--danger);text-align:center;">Search failed. Please try again.</div>\`;
+                    dropdown.innerHTML = `<div style="padding:16px;color:var(--danger);text-align:center;">Search failed. Please try again.</div>`;
                 }
                 return;
             }
