@@ -49,27 +49,46 @@
 <div id="screen-library" class="screen active">
     <div class="container">
 
-        <!-- Hero -->
-        <div class="hero">
-            <div>
-                <h1 class="hero-heading">YOUR<br><span class="accent">WATCH</span>VAULT</h1>
-                <p class="hero-sub">Track everything you watch. Get notified when new seasons drop. Discover what's next.</p>
-                <div class="hero-stats" id="hero-stats">
-                    <div class="stat-pill"><div class="stat-num" id="stat-total">0</div><div class="stat-label">Tracked</div></div>
-                    <div class="stat-pill"><div class="stat-num" id="stat-watching">0</div><div class="stat-label">Watching</div></div>
-                    <div class="stat-pill"><div class="stat-num" id="stat-completed">0</div><div class="stat-label">Completed</div></div>
-                    <div class="stat-pill"><div class="stat-num" id="stat-new" style="color:var(--accent)">0</div><div class="stat-label">New Available</div></div>
+        <!-- Dashboard Overview -->
+        <div class="dashboard-grid">
+            <!-- Continue Watching -->
+            <div class="dash-panel continue-panel" id="continue-watching-panel">
+                <div class="dash-panel-header">Continue Watching</div>
+                <div class="continue-content" id="continue-content">
+                    <div class="continue-empty">Nothing actively watching. Start a new show!</div>
                 </div>
             </div>
-        </div>
 
-        <!-- New Content Banner -->
-        <div id="new-content-banner" class="new-content-banner" style="display:none">
-            <div class="new-banner-text">
-                <span class="new-banner-count" id="new-banner-count">0</span>
-                titles have new content available since your last sync!
+            <!-- Coming Soon / New Releases -->
+            <div class="dash-panel upcoming-panel">
+                <div class="dash-panel-header">What's New & Upcoming</div>
+                <div class="upcoming-list" id="upcoming-list">
+                    <div class="upcoming-empty">No new releases.</div>
+                </div>
             </div>
-            <button class="btn btn-primary btn-sm" id="sync-nav-btn2">⚡ View Sync</button>
+
+            <!-- Stats Dashboard -->
+            <div class="dash-panel stats-panel">
+                <div class="dash-panel-header">Your Statistics</div>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-val" id="stat-hours">0</div>
+                        <div class="stat-lbl">Hours Watched</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-val" id="stat-episodes">0</div>
+                        <div class="stat-lbl">Episodes</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-val" id="stat-avg-rating">0.0★</div>
+                        <div class="stat-lbl">Avg Rating</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-val" id="stat-fav-genre">-</div>
+                        <div class="stat-lbl">Top Genre</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Category Tabs -->

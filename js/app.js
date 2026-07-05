@@ -46,11 +46,27 @@ function render() {
     const stats = lib.getStats(state.library, state.syncResults);
     ui.renderStats(stats);
     
-    const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.sortBy);
-    ui.renderGrid(filtered, state.syncResults, state.currentCat, (id) => {
+    const watching = state.library.filter(m => m.status === 'watching');
+    watching.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
+    const continueItem = watching.length > 0 ? watching[0] : null;
+
+    let upcoming = state.library.filter(m => m.hasNew || m.status === 'plan-to-watch');
+    upcoming.sort((a, b) => {
+        if (a.hasNew && !b.hasNew) return -1;
+        if (!a.hasNew && b.hasNew) return 1;
+        return new Date(b.addedAt) - new Date(a.addedAt);
+    });
+    upcoming = upcoming.slice(0, 4);
+
+    const openDetail = (id) => {
         const media = state.library.find(m => m.id === id);
         if (media) ui.openDetailModal(media);
-    });
+    };
+
+    ui.renderDashboardWidgets(continueItem, upcoming, openDetail);
+    
+    const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.sortBy);
+    ui.renderGrid(filtered, state.syncResults, state.currentCat, openDetail);
 }
 
 // ── Search & Unsplash (Posters) ─────────────────────────────────

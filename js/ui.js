@@ -31,23 +31,89 @@ export function escapeHTML(str) {
 }
 
 export function renderStats(stats) {
-    document.getElementById('stat-total').textContent = stats.total;
-    document.getElementById('stat-watching').textContent = stats.watching;
-    document.getElementById('stat-completed').textContent = stats.completed;
-    document.getElementById('stat-new').textContent = stats.newCount;
+    const elHours = document.getElementById('stat-hours');
+    const elEp = document.getElementById('stat-episodes');
+    const elRating = document.getElementById('stat-avg-rating');
+    const elGenre = document.getElementById('stat-fav-genre');
+    
+    if (elHours) elHours.textContent = stats.hoursWatched || 0;
+    if (elEp) elEp.textContent = stats.totalEpisodes || 0;
+    if (elRating) elRating.textContent = `${stats.avgRating || '0.0'}★`;
+    if (elGenre) elGenre.textContent = stats.topGenre || '-';
 
     document.getElementById('count-all').textContent = stats.total;
     ['anime-series', 'anime-movie', 'series', 'movie'].forEach(c => {
         const el = document.getElementById(`count-${c}`);
         if (el) el.textContent = stats.catCounts[c] || 0;
     });
+}
 
-    const banner = document.getElementById('new-content-banner');
-    if (stats.newCount > 0) {
-        document.getElementById('new-banner-count').textContent = stats.newCount;
-        banner.style.display = 'flex';
-    } else {
-        banner.style.display = 'none';
+export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick) {
+    // 1. Continue Watching
+    const continueWrap = document.getElementById('continue-content');
+    if (continueWrap) {
+        if (!continueItem) {
+            continueWrap.innerHTML = `<div class="continue-empty">Nothing actively watching. Start a new show!</div>`;
+        } else {
+            let progressText = '';
+            let progressPercent = 0;
+            
+            if (continueItem.category === 'movie' || continueItem.category === 'anime-movie') {
+                progressText = 'Watching';
+                progressPercent = 50;
+            } else {
+                const totalWatched = continueItem.seasons?.reduce((acc, s) => acc + (parseInt(s.watched)||0), 0) || 0;
+                const totalEpisodes = continueItem.seasons?.reduce((acc, s) => acc + (parseInt(s.total)||0), 0) || 0;
+                progressText = totalEpisodes > 0 ? `Watched ${totalWatched} / ${totalEpisodes} EP` : `Watched ${totalWatched} EP`;
+                progressPercent = totalEpisodes > 0 ? Math.min(100, Math.max(5, (totalWatched / totalEpisodes) * 100)) : 5;
+            }
+            
+            const posterHTML = continueItem.poster 
+                ? `<img src="${continueItem.poster}" class="continue-poster">` 
+                : `<div class="continue-poster" style="display:flex;align-items:center;justify-content:center;font-size:40px;border:1px solid var(--border)">${CAT_EMOJI[continueItem.category]||'🎬'}</div>`;
+
+            continueWrap.innerHTML = `
+                <div class="continue-card">
+                    ${posterHTML}
+                    <div class="continue-info">
+                        <div class="continue-title">${escapeHTML(continueItem.title)}</div>
+                        <div class="continue-meta">${CAT_LABELS[continueItem.category]} · ${continueItem.year || '?'}</div>
+                        <div class="continue-progress-text">${progressText}</div>
+                        <div class="continue-bar"><div class="continue-bar-fill" style="width:${progressPercent}%"></div></div>
+                        <button class="btn btn-primary btn-sm" id="dash-continue-btn" style="align-self:flex-start">Continue →</button>
+                    </div>
+                </div>
+            `;
+            const btn = document.getElementById('dash-continue-btn');
+            if (btn) btn.addEventListener('click', () => onCardClick(continueItem.id));
+        }
+    }
+
+    // 2. Upcoming / New Releases
+    const upcomingWrap = document.getElementById('upcoming-list');
+    if (upcomingWrap) {
+        if (!upcomingItems || !upcomingItems.length) {
+            upcomingWrap.innerHTML = `<div class="upcoming-empty">No new releases available.</div>`;
+        } else {
+            upcomingWrap.innerHTML = '';
+            upcomingItems.forEach(item => {
+                const posterHTML = item.poster 
+                    ? `<img src="${item.poster}" class="upcoming-poster">` 
+                    : `<div class="upcoming-poster" style="display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--surface);border:1px solid var(--border)">${CAT_EMOJI[item.category]||'🎬'}</div>`;
+                
+                const div = document.createElement('div');
+                div.className = 'upcoming-item';
+                div.innerHTML = `
+                    ${posterHTML}
+                    <div class="upcoming-info">
+                        <div class="upcoming-title">${escapeHTML(item.title)}</div>
+                        <div class="upcoming-meta">${item.hasNew ? 'New Content!' : 'Coming Soon'}</div>
+                    </div>
+                `;
+                div.addEventListener('click', () => onCardClick(item.id));
+                upcomingWrap.appendChild(div);
+            });
+        }
     }
 }
 
