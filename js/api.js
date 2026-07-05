@@ -16,6 +16,7 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 const COHERE_BASE = 'https://api.cohere.ai/v1/chat';
 
 const PROXY_AI = '/.netlify/functions/ai-proxy';
+const PROXY_TMDB = '/.netlify/functions/tmdb-proxy';
 const PROXY_TIMEOUT_MS = 9000;
 const REQUEST_TIMEOUT_MS = 25000;
 
@@ -50,6 +51,29 @@ async function callViaProxy(prompt) {
         throw err;
     } finally {
         clearTimeout(timeout);
+    }
+}
+
+export async function callTMDB(proxyEndpoint, params, config) {
+    if (config && config.tmdbKey && !isProxied()) {
+        let url = '';
+        const tmdbKey = config.tmdbKey;
+        if (proxyEndpoint === 'search-movie') url = `https://api.themoviedb.org/3/search/movie?api_key=${tmdbKey}&query=${encodeURIComponent(params.query)}`;
+        else if (proxyEndpoint === 'search-tv') url = `https://api.themoviedb.org/3/search/tv?api_key=${tmdbKey}&query=${encodeURIComponent(params.query)}`;
+        else if (proxyEndpoint === 'tv-details') url = `https://api.themoviedb.org/3/tv/${params.tvId}?api_key=${tmdbKey}`;
+        else if (proxyEndpoint === 'movie-details') url = `https://api.themoviedb.org/3/movie/${params.tvId}?api_key=${tmdbKey}`;
+        
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`TMDB error ${res.status}`);
+        return await res.json();
+    } else {
+        const queryParams = new URLSearchParams({ endpoint: proxyEndpoint, ...params });
+        const res = await fetch(`${PROXY_TMDB}?${queryParams.toString()}`);
+        if (!res.ok) {
+            const errText = await res.text().catch(()=>'');
+            throw new Error(`TMDB proxy error ${res.status}: ${errText}`);
+        }
+        return await res.json();
     }
 }
 

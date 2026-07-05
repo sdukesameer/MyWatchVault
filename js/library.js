@@ -42,6 +42,12 @@ export function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+export function normalizeTitle(title) {
+    if (!title) return '';
+    // Remove spaces, punctuation, symbols, and lowercase
+    return title.toLowerCase().replace(/[\s\-_'",.:;!?()[\]{}]/g, '');
+}
+
 export function addMedia(lib, item) {
     const media = {
         id: uid(),
@@ -56,7 +62,10 @@ export function addMedia(lib, item) {
         notes: item.notes || '',
         poster: item.poster || null,
         addedAt: new Date().toISOString(),
-        hasNew: false
+        hasNew: false,
+        jikanId: item.jikanId || null,
+        tvmazeId: item.tvmazeId || null,
+        tmdbId: item.tmdbId || null
     };
     
     if ((media.category === 'series' || media.category === 'anime-series') && media.seasons.length === 0) {

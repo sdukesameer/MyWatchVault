@@ -3,74 +3,81 @@
 
 import { callAI, extractJSON } from './api.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, escapeHTML } from './ui.js';
+import { loadSyncMeta, normalizeTitle } from './library.js';
 
 export async function runSync(library, config, onProgress) {
-    if (!library.length) {
-        throw new Error('Add some titles first!');
-    }
-
-    const summaries = library.map(m => {
-        const seasons = m.seasons?.length
-            ? m.seasons.map(s => `S${s.number}: watched ${s.watched}/${s.total || '?'} ep`).join(', ')
-            : '';
-        return `- ${m.title} (${CAT_LABELS[m.category]}, ${m.year || '?'}) | Status: ${m.status}${seasons ? ' | ' + seasons : ''}`;
-    }).join('\n');
-
-    const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-
-    const prompt = `Today is ${today}. You are a knowledgeable entertainment database assistant with knowledge up to your training cutoff.
-
-The user tracks these titles:
-${summaries}
-
-For each title, check your knowledge and return what you know about the latest status:
-- For anime/series: latest season number, episode count, whether it's ongoing/completed/cancelled
-- For movies: sequels, prequels, upcoming releases
-- Compare against what the user has watched and flag if there's new content they haven't seen
-
-Return a JSON array, one object per title (in same order), with:
-{
-  "title": "...",
-  "latestStatus": "brief description of latest known status",
-  "latestSeason": 3,
-  "latestEpisodes": 24,
-  "isOngoing": true,
-  "hasNewContent": true,
-  "newContentSummary": "Season 4 announced / Movie sequel confirmed / etc",
-  "upToDate": false
-}
-
-For "upToDate": compare what user has watched vs what's available. If they've watched all available content, set true.
-Return ONLY valid JSON array.`;
-
-    const text = await callAI(prompt, config);
-    const results = extractJSON(text);
-
+    if (!library.length) throw new Error('Add some titles first!');
+    
     const newSyncResults = {};
     const updatedLibrary = [...library];
     
-    updatedLibrary.forEach((media) => {
-        const result = results.find(r => r.title?.toLowerCase().includes(media.title.toLowerCase()) || media.title.toLowerCase().includes(r.title?.toLowerCase()));
-        if (result) {
-            newSyncResults[media.id] = result;
-            media.hasNew = result.hasNewContent && !result.upToDate;
-            
-            if (media.category.includes('series')) {
-                if (result.latestSeason && typeof result.latestSeason === 'number') {
-                    while (media.seasons.length < result.latestSeason) {
-                        media.seasons.push({ number: media.seasons.length + 1, watched: 0, total: 0 });
+    const promises = updatedLibrary.map(async (media) => {
+        let result = null;
+        try {
+            if (media.jikanId) {
+                const res = await fetch(`https://api.jikan.moe/v4/anime/${media.jikanId}`).then(r=>r.json());
+                if (res.data) {
+                    result = {
+                        latestStatus: res.data.status,
+                        latestEpisodes: res.data.episodes,
+                        latestSeason: 1,
+                        isOngoing: res.data.status === 'Currently Airing',
+                        upToDate: false
+                    };
+                    const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
+                    if (res.data.episodes && totalWatched >= res.data.episodes) result.upToDate = true;
+                    if (res.data.status === 'Finished Airing' && totalWatched >= res.data.episodes) result.upToDate = true;
+                }
+            } else if (media.tvmazeId) {
+                const res = await fetch(`https://api.tvmaze.com/shows/${media.tvmazeId}`).then(r=>r.json());
+                result = {
+                    latestStatus: res.status,
+                    isOngoing: res.status !== 'Ended',
+                    upToDate: false
+                };
+            } else if (media.tmdbId) {
+                if (media.category === 'movie') {
+                    const res = await (await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${config.tmdbKey || ''}`)).json().catch(()=>({}));
+                    if (res.status) {
+                        result = {
+                            latestStatus: res.status,
+                            isOngoing: res.status !== 'Released',
+                            upToDate: true
+                        };
                     }
-                    if (result.latestEpisodes && media.seasons.length > 0) {
-                        const targetSeason = media.seasons[result.latestSeason - 1];
-                        if (targetSeason) {
-                            targetSeason.total = Math.max(targetSeason.total || 0, result.latestEpisodes);
+                } else if (media.category === 'series') {
+                    const res = await (await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}?api_key=${config.tmdbKey || ''}`)).json().catch(()=>({}));
+                    if (res.status) {
+                        result = {
+                            latestStatus: res.status,
+                            latestSeason: res.number_of_seasons,
+                            latestEpisodes: res.number_of_episodes,
+                            isOngoing: res.status === 'Returning Series',
+                            upToDate: false
+                        };
+                    }
+                }
+            }
+            
+            if (result) {
+                result.hasNewContent = !result.upToDate;
+                newSyncResults[media.id] = result;
+                media.hasNew = result.hasNewContent;
+                
+                if (media.category.includes('series')) {
+                    if (result.latestSeason && typeof result.latestSeason === 'number') {
+                        while (media.seasons.length < result.latestSeason) {
+                            media.seasons.push({ number: media.seasons.length + 1, watched: 0, total: 0 });
                         }
                     }
                 }
             }
+        } catch (e) {
+            console.warn(`Sync failed for ${media.title}:`, e);
         }
     });
 
+    await Promise.allSettled(promises);
     return { updatedLibrary, syncResults: newSyncResults };
 }
 
@@ -90,7 +97,7 @@ export function renderSyncScreen(library, syncResults) {
     list.innerHTML = '';
     
     // Add Last Synced Time
-    const syncMeta = syncResults._meta;
+    const syncMeta = loadSyncMeta();
     if (syncMeta?.lastSync) {
         const lastSyncDate = new Date(syncMeta.lastSync).toLocaleString();
         const metaDiv = document.createElement('div');

@@ -5,7 +5,7 @@ import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations } from './recommendations.js';
-import { callAI, extractJSON, getLastProvider } from './api.js';
+import { callAI, extractJSON, getLastProvider, callTMDB } from './api.js';
 import { escapeHTML } from './ui.js';
 
 const state = {
@@ -37,6 +37,7 @@ function loadConfig() {
         openrouterKey: isPlaceholder(ENV_KEYS.openrouterKey) ? '' : ENV_KEYS.openrouterKey,
         cohereKey: isPlaceholder(ENV_KEYS.cohereKey) ? '' : ENV_KEYS.cohereKey,
         unsplashKey: isPlaceholder(ENV_KEYS.unsplashKey) ? '' : ENV_KEYS.unsplashKey,
+        tmdbKey: isPlaceholder(ENV_KEYS.tmdbKey) ? '' : ENV_KEYS.tmdbKey,
     };
 }
 
@@ -53,6 +54,30 @@ function render() {
 }
 
 // ── Search & Unsplash (Posters) ─────────────────────────────────
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CACHE_LIMIT = 100;
+
+function getCachedSearch(query) {
+    const q = query.toLowerCase();
+    if (state.searchCache.has(q)) {
+        const entry = state.searchCache.get(q);
+        if (Date.now() - entry.timestamp < CACHE_TTL_MS) {
+            return entry.results;
+        }
+        state.searchCache.delete(q);
+    }
+    return null;
+}
+
+function setCachedSearch(query, results) {
+    const q = query.toLowerCase();
+    state.searchCache.set(q, { results, timestamp: Date.now() });
+    if (state.searchCache.size > CACHE_LIMIT) {
+        const oldestKey = state.searchCache.keys().next().value;
+        state.searchCache.delete(oldestKey);
+    }
+}
+
 let _searchTimer = null;
 async function searchTitles(query) {
     const dropdown = document.getElementById('search-dropdown');
@@ -67,18 +92,94 @@ async function searchTitles(query) {
         <div class="search-item skeleton" style="height: 80px;"></div>
     `;
 
-    let results = [];
-    if (state.searchCache.has(query.toLowerCase())) {
-        results = state.searchCache.get(query.toLowerCase());
-    } else {
+    let results = getCachedSearch(query);
+    if (!results) {
         try {
-            const prompt = `Search for entertainment titles matching: "${query}"
-Return a JSON array of up to 6 results. Each: { "title": "...", "year": 2024, "category": "anime-series|anime-movie|series|movie", "genre": "Action, Drama", "description": "1-2 sentence description" }
-ONLY valid JSON array, no markdown.`;
+            results = [];
+            const [jikanRes, tvmazeRes, tmdbMovie, tmdbTv] = await Promise.allSettled([
+                fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=3`).then(r=>r.json()),
+                fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`).then(r=>r.json()),
+                callTMDB('search-movie', { query }, state.config),
+                callTMDB('search-tv', { query }, state.config)
+            ]);
 
-            const text = await callAI(prompt, state.config);
-            results = extractJSON(text);
-            state.searchCache.set(query.toLowerCase(), results);
+            if (jikanRes.status === 'fulfilled' && jikanRes.value.data) {
+                jikanRes.value.data.slice(0, 3).forEach(a => {
+                    results.push({
+                        title: a.title_english || a.title,
+                        year: a.year || (a.aired?.from ? new Date(a.aired.from).getFullYear() : null),
+                        category: a.type === 'Movie' ? 'anime-movie' : 'anime-series',
+                        genre: a.genres?.map(g => g.name).join(', ') || 'Anime',
+                        description: (a.synopsis || '').slice(0, 150) + '...',
+                        poster: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url,
+                        jikanId: a.mal_id
+                    });
+                });
+            }
+
+            if (tvmazeRes.status === 'fulfilled' && Array.isArray(tvmazeRes.value)) {
+                tvmazeRes.value.slice(0, 3).forEach(item => {
+                    const s = item.show;
+                    results.push({
+                        title: s.name,
+                        year: s.premiered ? new Date(s.premiered).getFullYear() : null,
+                        category: 'series',
+                        genre: s.genres?.join(', ') || 'Series',
+                        description: (s.summary || '').replace(/<[^>]*>?/gm, '').slice(0, 150) + '...',
+                        poster: s.image?.original || s.image?.medium,
+                        tvmazeId: s.id
+                    });
+                });
+            }
+
+            if (tmdbMovie.status === 'fulfilled' && tmdbMovie.value.results) {
+                tmdbMovie.value.results.slice(0, 3).forEach(m => {
+                    results.push({
+                        title: m.title,
+                        year: m.release_date ? new Date(m.release_date).getFullYear() : null,
+                        category: 'movie',
+                        genre: 'Movie',
+                        description: (m.overview || '').slice(0, 150) + '...',
+                        poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null,
+                        tmdbId: m.id
+                    });
+                });
+            }
+
+            if (tmdbTv.status === 'fulfilled' && tmdbTv.value.results) {
+                tmdbTv.value.results.slice(0, 2).forEach(s => {
+                    results.push({
+                        title: s.name,
+                        year: s.first_air_date ? new Date(s.first_air_date).getFullYear() : null,
+                        category: 'series',
+                        genre: 'Series',
+                        description: (s.overview || '').slice(0, 150) + '...',
+                        poster: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
+                        tmdbId: s.id
+                    });
+                });
+            }
+
+            const unique = [];
+            const seen = new Set();
+            results.forEach(r => {
+                const norm = lib.normalizeTitle(r.title) + r.category;
+                if (!seen.has(norm)) {
+                    seen.add(norm);
+                    unique.push(r);
+                }
+            });
+            results = unique;
+
+            results.sort((a, b) => {
+                const aMatch = a.title.toLowerCase().includes(query.toLowerCase());
+                const bMatch = b.title.toLowerCase().includes(query.toLowerCase());
+                if (aMatch && !bMatch) return -1;
+                if (!aMatch && bMatch) return 1;
+                return 0;
+            });
+
+            setCachedSearch(query, results);
         } catch (err) {
             dropdown.innerHTML = `<div class="search-no-results">${err.message}</div>`;
             return;
@@ -92,12 +193,13 @@ ONLY valid JSON array, no markdown.`;
 
     dropdown.innerHTML = '';
         results.forEach(item => {
-            const inLib = state.library.some(m => m.title.toLowerCase() === item.title.toLowerCase());
+            const normItemTitle = lib.normalizeTitle(item.title);
+            const inLib = state.library.some(m => lib.normalizeTitle(m.title) === normItemTitle && m.category === item.category);
             const div = document.createElement('div');
             div.className = 'search-item';
             div.tabIndex = 0;
             div.innerHTML = `
-                <div class="card-poster-placeholder" style="width:40px;height:56px;font-size:24px;border-radius:6px;background:var(--surface);border:1px solid var(--border);">${ui.CAT_EMOJI[item.category] || '🎬'}</div>
+                ${item.poster ? `<img src="${item.poster}" class="card-poster-placeholder" style="width:40px;height:56px;border-radius:6px;object-fit:cover;">` : `<div class="card-poster-placeholder" style="width:40px;height:56px;font-size:24px;border-radius:6px;background:var(--surface);border:1px solid var(--border);">${ui.CAT_EMOJI[item.category] || '🎬'}</div>`}
                 <div class="search-item-info">
                     <div class="search-item-title">${escapeHTML(item.title)}</div>
                     <div class="search-item-meta">${ui.CAT_LABELS[item.category] || ''} · ${escapeHTML(item.year || '?')} · ${escapeHTML(item.genre || '')}</div>
@@ -114,32 +216,8 @@ ONLY valid JSON array, no markdown.`;
                         btn.textContent = 'Adding...';
                         btn.disabled = true;
                     }
-                    ui.showLoading(`Adding ${item.title}...`, 'Fetching posters');
-                    
-                    try {
-                        let posterUrl = null;
-                        if (item.category.includes('anime')) {
-                            const res = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`);
-                            const json = await res.json();
-                            posterUrl = json.data?.[0]?.images?.jpg?.large_image_url || json.data?.[0]?.images?.jpg?.image_url;
-                        } 
-                        if (!posterUrl && (item.category === 'series' || item.category.includes('anime'))) {
-                            const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`);
-                            const json = await res.json();
-                            posterUrl = json[0]?.show?.image?.original || json[0]?.show?.image?.medium;
-                        }
-                        if (!posterUrl && state.config.unsplashKey) {
-                             const res = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(item.title + ' movie poster')}&per_page=1&orientation=portrait&client_id=${state.config.unsplashKey}`);
-                             const photoData = await res.json();
-                             posterUrl = photoData.results?.[0]?.urls?.small;
-                        }
-                        if (posterUrl) item.poster = posterUrl;
-                    } catch(err) {
-                        console.warn('Poster fetch failed', err);
-                    }
                     
                     const media = lib.addMedia(state.library, item);
-                    ui.hideLoading();
                     ui.showToast(`"${media.title}" added to vault ✓`, 'success');
                     dropdown.style.display = 'none';
                     document.getElementById('search-input').value = '';
@@ -264,7 +342,8 @@ function bindEvents() {
         const category = document.getElementById('add-category').value;
         if (!title || !category) { ui.showToast('Fill in title and category', 'error'); return; }
         
-        const isDuplicate = state.library.some(m => m.title.toLowerCase() === title.toLowerCase() && m.category === category);
+        const normTitle = lib.normalizeTitle(title);
+        const isDuplicate = state.library.some(m => lib.normalizeTitle(m.title) === normTitle && m.category === category);
         if (isDuplicate) {
             ui.showToast(`"${title}" is already in your vault!`, 'error');
             return;
