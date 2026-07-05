@@ -128,9 +128,15 @@ function loadConfig() {
 }
 
 // ── Render Cycle ────────────────────────────────────────────────
-const openDetail = (id) => {
-    const media = state.library.find(m => m.id === id);
-    if (media) ui.openDetailModal(media);
+const openDetail = (mediaOrId) => {
+    let media = typeof mediaOrId === 'string' ? state.library.find(m => m.id === mediaOrId) : mediaOrId;
+    if (!media) return;
+    if (media.hasNew && media.id && !media.id.startsWith('preview_')) {
+        media.hasNew = false;
+        lib.updateMedia(state.library, media.id, { hasNew: false });
+        render(); // Clear badge immediately
+    }
+    ui.openDetailModal(media);
 };
 
 function render() {
@@ -264,7 +270,13 @@ async function handleFetchRecos(append = false) {
                 tags: []
             };
             state.previewItem = previewItem;
-            ui.openDetailModal(previewItem);
+            openDetail(previewItem);
+        };
+        
+        window.openPreviewItem = (idx) => {
+            const previewItem = allRecosLoaded[idx];
+            state.previewItem = { ...previewItem, id: 'preview_' + Date.now(), status: 'plan-to-watch', seasons: [] };
+            openDetail(state.previewItem);
         };
         
         renderRecommendations(allRecosLoaded, state.library, recoCallback, openDetail);
@@ -336,8 +348,8 @@ function bindEvents() {
             showToast("Your Plan to Watch list is empty!", "info");
             return;
         }
-        const randomItem = pool[Math.floor(Math.random() * pool.length)];
-        ui.openDetailModal(randomItem);
+        const randomItem = state.library[Math.floor(Math.random() * state.library.length)];
+        openDetail(randomItem);
     });
 
     // Search
@@ -359,19 +371,8 @@ function bindEvents() {
         const seasons = await fetchDeepDetails(item);
         hideLoading();
         
-        const previewItem = {
-            ...item,
-            id: 'preview_' + Date.now(),
-            status: 'plan-to-watch',
-            seasons: seasons,
-            rating: 0,
-            notes: '',
-            addedAt: new Date().toISOString(),
-            rewatchCount: 0,
-            tags: []
-        };
-        state.previewItem = previewItem;
-        ui.openDetailModal(previewItem);
+        state.previewItem = { ...item, id: 'preview_' + Date.now(), status: 'plan-to-watch', seasons: [] };
+        openDetail(state.previewItem);
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { dropdown.style.display = 'none'; document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); } });
 
@@ -432,6 +433,14 @@ function bindEvents() {
                     mediaData.tmdbId = best.id;
                     if (best.vote_average) mediaData.globalRating = `${best.vote_average.toFixed(1)} ★`;
                     mediaData.description = (best.overview || '').slice(0, 300) + (best.overview?.length > 300 ? '...' : '');
+
+                    try {
+                        const detailEnd = category.includes('movie') ? 'movie-details' : 'tv-details';
+                        const details = await callTMDB(detailEnd, { tvId: best.id }, state.config);
+                        if (!mediaData.genre && details.genres) {
+                            mediaData.genre = details.genres.map(g => g.name).join(', ');
+                        }
+                    } catch(e) {}
                 }
             }
         } catch (err) {
@@ -440,6 +449,14 @@ function bindEvents() {
 
         const media = lib.addMedia(state.library, mediaData);
         
+        try {
+            const fetchedSeasons = await fetchDeepDetails(media);
+            if (fetchedSeasons && fetchedSeasons.length > 0) {
+                media.seasons = fetchedSeasons;
+                lib.updateMedia(state.library, media.id, { seasons: fetchedSeasons });
+            }
+        } catch(e) {}
+
         hideLoading();
         render();
         showToast(`Added "${title}" to your vault`, 'success');
@@ -448,7 +465,7 @@ function bindEvents() {
         document.getElementById('add-category').value = '';
         document.getElementById('add-status').value = 'plan-to-watch';
         
-        setTimeout(() => ui.openDetailModal(media), 100);
+        setTimeout(() => openDetail(media), 100);
     });
 
     // Detail Modal
@@ -548,8 +565,8 @@ function bindEvents() {
                 });
                 media.seasons = newSeasons;
                 
-                // Refresh modal
-                ui.openDetailModal(media);
+                const data = ui.collectDetailData();
+                openDetail(media);
                 
                 // Update sync results if not a preview
                 if (!data.id.startsWith('preview_')) {
@@ -678,4 +695,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     bindEvents();
     render();
+
+    // Daily auto-sync check
+    const today = new Date().toDateString();
+    if (localStorage.getItem('lastAutoSyncDate') !== today) {
+        localStorage.setItem('lastAutoSyncDate', today);
+        setTimeout(() => {
+            if (state.library.length > 0) handleRunSync();
+        }, 3000);
+    }
 });
