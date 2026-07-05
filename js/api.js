@@ -17,7 +17,7 @@ const COHERE_BASE = 'https://api.cohere.ai/v1/chat';
 
 const PROXY_AI = '/.netlify/functions/ai-proxy';
 const PROXY_TMDB = '/.netlify/functions/tmdb-proxy';
-const PROXY_TIMEOUT_MS = 9000;
+const PROXY_TIMEOUT_MS = 35000;
 const REQUEST_TIMEOUT_MS = 25000;
 
 function isProxied() {

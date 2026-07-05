@@ -1,34 +1,10 @@
 // js/ui.js
 // DOM Rendering functions
 
-export const CAT_LABELS = {
-    'anime-series': 'Anime', 'anime-movie': 'Anime Film',
-    'series': 'Series', 'movie': 'Movie'
-};
-
-export const CAT_EMOJI = {
-    'anime-series': '⛩️', 'anime-movie': '🎌',
-    'series': '📺', 'movie': '🎬'
-};
-
-export const STATUS_LABELS = {
-    'watching': '▶ Watching', 'completed': '✓ Completed',
-    'plan-to-watch': '⊕ Plan to Watch', 'on-hold': '⏸ On Hold', 'dropped': '✗ Dropped'
-};
-
-const STATUS_DOT_CLASS = {
-    'watching': 'watching', 'completed': 'completed',
-    'plan-to-watch': 'not-started', 'on-hold': 'on-hold', 'dropped': 'on-hold'
-};
+import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, STATUS_DOT_CLASS } from './constants.js';
+import { escapeHTML } from './utils.js';
 
 let editingId = null;
-
-export function escapeHTML(str) {
-    if (typeof str !== 'string' && typeof str !== 'number') return '';
-    return String(str).replace(/[&<>'"]/g, tag => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-    }[tag] || tag));
-}
 
 export function renderStats(stats) {
     const elHours = document.getElementById('stat-hours');
@@ -389,34 +365,6 @@ export function collectDetailData() {
     };
 }
 
-export function showToast(msg, type = 'info') {
-    const t = document.createElement('div');
-    t.className = `toast toast-${type}`;
-    t.textContent = msg;
-    document.getElementById('toast-container').appendChild(t);
-    setTimeout(() => t.classList.add('show'), 10);
-    setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 400); }, 3200);
-}
-
-let _loadingTimeout = null;
-export function showLoading(msg, sub = '') {
-    const loader = document.getElementById('loading-overlay');
-    document.getElementById('loading-text').textContent = msg;
-    document.getElementById('loading-sub').textContent = sub;
-    loader.classList.remove('hidden');
-    
-    if (_loadingTimeout) clearTimeout(_loadingTimeout);
-    _loadingTimeout = setTimeout(() => {
-        hideLoading();
-        showToast('Operation timed out', 'error');
-    }, 15000);
-}
-
-export function hideLoading() {
-    if (_loadingTimeout) clearTimeout(_loadingTimeout);
-    document.getElementById('loading-overlay').classList.add('hidden');
-}
-
 export function openModal(id) {
     document.getElementById(id).classList.remove('hidden');
 }
@@ -429,40 +377,4 @@ export function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-export function renderConfirmModal(title, text, confirmText, onConfirm) {
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay hidden';
-    modal.innerHTML = `
-        <div class="modal-card narrow">
-            <div class="modal-header">
-                <div class="modal-title">${escapeHTML(title)}</div>
-            </div>
-            <div class="modal-body">
-                <p style="font-size: 14px; color: var(--text-dim); line-height: 1.6;">${escapeHTML(text)}</p>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary confirm-cancel">Cancel</button>
-                <button class="btn btn-primary confirm-action" style="background:var(--danger); box-shadow: 0 4px 20px rgba(255,71,87,0.35);">${escapeHTML(confirmText)}</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // Animate in
-    setTimeout(() => modal.classList.remove('hidden'), 10);
-    
-    const close = () => {
-        modal.classList.add('hidden');
-        setTimeout(() => modal.remove(), 250);
-    };
-    
-    modal.querySelector('.confirm-cancel').addEventListener('click', close);
-    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
-    modal.querySelector('.confirm-action').addEventListener('click', () => {
-        onConfirm();
-        close();
-    });
 }

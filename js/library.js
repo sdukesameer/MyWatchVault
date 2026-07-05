@@ -4,13 +4,40 @@
 const DB_KEY = 'watchvault_library';
 const SYNC_KEY = 'watchvault_sync';
 
-export function loadLibrary() {
-    try { return JSON.parse(localStorage.getItem(DB_KEY) || '[]'); } catch { return []; }
+export class StorageCorruptionError extends Error {
+    constructor(msg) {
+        super(msg);
+        this.name = 'StorageCorruptionError';
+    }
 }
 
+export function loadLibrary() {
+    const raw = localStorage.getItem(DB_KEY);
+    if (!raw) return []; // First time user
+    try { 
+        return JSON.parse(raw); 
+    } catch (e) {
+        throw new StorageCorruptionError('WatchVault library data is corrupted.');
+    }
+}
+
+let editCounter = 0;
+
 export function saveLibrary(lib) {
-    try { localStorage.setItem(DB_KEY, JSON.stringify(lib)); }
-    catch (e) { console.error('Storage error', e); throw e; }
+    try { 
+        localStorage.setItem(DB_KEY, JSON.stringify(lib)); 
+        localStorage.setItem(DB_KEY + '_version', '1'); // Schema version
+        
+        editCounter++;
+        if (editCounter >= 10) {
+            editCounter = 0;
+            localStorage.setItem(DB_KEY + '_backup_previous', JSON.stringify(lib));
+        }
+    }
+    catch (e) { 
+        console.error('Storage error', e); 
+        throw e; // Callers must catch QuotaExceededError
+    }
 }
 
 export function loadSyncResults() {

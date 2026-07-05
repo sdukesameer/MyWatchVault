@@ -5,7 +5,7 @@ exports.handler = async (event, context) => {
     context.callbackWaitsForEmptyEventLoop = false;
     
     const origin = event.headers.origin || event.headers.Origin || '';
-    const allowedOrigins = ['http://localhost:3000', 'https://mywatchvault.netlify.app'];
+    const allowedOrigins = ['http://localhost:3000', 'https://mywatchvault.netlify.app', 'http://127.0.0.1:5500'];
     const corsHeaders = {
         'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : allowedOrigins[1],
         'Access-Control-Allow-Headers': 'Content-Type',
@@ -38,7 +38,7 @@ exports.handler = async (event, context) => {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const cohereKey = process.env.COHERE_API_KEY;
 
-    const PROVIDER_TIMEOUT_MS = 9000;
+    const PROVIDER_TIMEOUT_MS = 5000;
     const withTimeout = (promise, ms, name) =>
         Promise.race([
             promise,

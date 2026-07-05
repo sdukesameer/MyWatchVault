@@ -6,7 +6,10 @@ import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations } from './recommendations.js';
 import { callAI, extractJSON, getLastProvider, callTMDB } from './api.js';
-import { escapeHTML } from './ui.js';
+import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility } from './utils.js';
+import { setupSearch } from './search.js';
+import { getStats, getDashboardItems } from './dashboard.js';
+import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './constants.js';
 
 const state = {
     library: [],
@@ -16,7 +19,6 @@ const state = {
     sortBy: 'recently-added',
     filterStatus: 'all',
     filterGenre: 'all',
-    filterRating: 'all',
     filterRating: 'all',
     searchCache: new Map(),
     previewItem: null
@@ -104,7 +106,7 @@ function loadConfig() {
 
 // ── Render Cycle ────────────────────────────────────────────────
 function render() {
-    const stats = lib.getStats(state.library, state.syncResults);
+    const stats = getStats(state.library);
     ui.renderStats(stats);
     
     // Dynamically populate genre filter
@@ -119,25 +121,7 @@ function render() {
         sortedGenres.map(g => `<option value="${escapeHTML(g)}">${escapeHTML(g)}</option>`).join('');
     genreSelect.value = sortedGenres.includes(currentGenre) ? currentGenre : 'all';
     state.filterGenre = genreSelect.value;
-    
-    const watching = state.library.filter(m => m.status === 'watching');
-    watching.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
-    let continueItem = watching.length > 0 ? watching[0] : null;
-
-    if (!continueItem) {
-        const planToWatch = state.library.filter(m => m.status === 'plan-to-watch');
-        if (planToWatch.length > 0) {
-            continueItem = planToWatch[Math.floor(Math.random() * planToWatch.length)];
-            continueItem.isFallback = true;
-        }
-    }
-    let upcoming = state.library.filter(m => m.hasNew || m.status === 'plan-to-watch');
-    upcoming.sort((a, b) => {
-        if (a.hasNew && !b.hasNew) return -1;
-        if (!a.hasNew && b.hasNew) return 1;
-        return new Date(b.addedAt) - new Date(a.addedAt);
-    });
-    upcoming = upcoming.slice(0, 4);
+    const { continueItem, upcoming } = getDashboardItems(state.library);
 
     const openDetail = (id) => {
         const media = state.library.find(m => m.id === id);
@@ -175,187 +159,6 @@ function setCachedSearch(query, results) {
     }
 }
 
-let _searchTimer = null;
-async function searchTitles(query) {
-    const dropdown = document.getElementById('search-dropdown');
-    if (query.length < 2) { dropdown.style.display = 'none'; return; }
-
-    dropdown.style.display = 'block';
-    
-    // Skeleton loader
-    dropdown.innerHTML = `
-        <div class="search-item skeleton" style="height: 80px;"></div>
-        <div class="search-item skeleton" style="height: 80px;"></div>
-        <div class="search-item skeleton" style="height: 80px;"></div>
-    `;
-
-    let results = getCachedSearch(query);
-    if (!results) {
-        try {
-            results = [];
-            const [jikanRes, tvmazeRes, tmdbMovie, tmdbTv] = await Promise.allSettled([
-                fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=3`).then(r=>r.json()),
-                fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`).then(r=>r.json()),
-                callTMDB('search-movie', { query }, state.config),
-                callTMDB('search-tv', { query }, state.config)
-            ]);
-
-            if (jikanRes.status === 'fulfilled' && jikanRes.value.data) {
-                jikanRes.value.data.slice(0, 3).forEach(a => {
-                    results.push({
-                        title: a.title_english || a.title,
-                        year: a.year || (a.aired?.from ? new Date(a.aired.from).getFullYear() : null),
-                        category: a.type === 'Movie' ? 'anime-movie' : 'anime-series',
-                        genre: a.genres?.map(g => g.name).join(', ') || 'Anime',
-                        description: (a.synopsis || '').slice(0, 150) + '...',
-                        poster: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url,
-                        jikanId: a.mal_id,
-                        globalRating: a.score ? `${a.score} ★` : null
-                    });
-                });
-            }
-
-            if (tvmazeRes.status === 'fulfilled' && Array.isArray(tvmazeRes.value)) {
-                tvmazeRes.value.slice(0, 3).forEach(item => {
-                    const s = item.show;
-                    results.push({
-                        title: s.name,
-                        year: s.premiered ? new Date(s.premiered).getFullYear() : null,
-                        category: 'series',
-                        genre: s.genres?.join(', ') || 'Series',
-                        description: (s.summary || '').replace(/<[^>]*>?/gm, '').slice(0, 150) + '...',
-                        poster: s.image?.original || s.image?.medium,
-                        tvmazeId: s.id,
-                        globalRating: s.rating?.average ? `${s.rating.average} ★` : null
-                    });
-                });
-            }
-
-            if (tmdbMovie.status === 'fulfilled' && tmdbMovie.value.results) {
-                tmdbMovie.value.results.slice(0, 3).forEach(m => {
-                    results.push({
-                        title: m.title,
-                        year: m.release_date ? new Date(m.release_date).getFullYear() : null,
-                        category: 'movie',
-                        genre: 'Movie',
-                        description: (m.overview || '').slice(0, 150) + '...',
-                        poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null,
-                        tmdbId: m.id,
-                        globalRating: m.vote_average ? `${m.vote_average.toFixed(1)} ★` : null
-                    });
-                });
-            }
-
-            if (tmdbTv.status === 'fulfilled' && tmdbTv.value.results) {
-                tmdbTv.value.results.slice(0, 2).forEach(s => {
-                    results.push({
-                        title: s.name,
-                        year: s.first_air_date ? new Date(s.first_air_date).getFullYear() : null,
-                        category: 'series',
-                        genre: 'Series',
-                        description: (s.overview || '').slice(0, 150) + '...',
-                        poster: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
-                        tmdbId: s.id,
-                        globalRating: s.vote_average ? `${s.vote_average.toFixed(1)} ★` : null
-                    });
-                });
-            }
-
-            const unique = [];
-            const seen = new Set();
-            results.forEach(r => {
-                const norm = lib.normalizeTitle(r.title) + r.category;
-                if (!seen.has(norm)) {
-                    seen.add(norm);
-                    unique.push(r);
-                }
-            });
-            results = unique;
-
-            results.sort((a, b) => {
-                const aMatch = a.title.toLowerCase().includes(query.toLowerCase());
-                const bMatch = b.title.toLowerCase().includes(query.toLowerCase());
-                if (aMatch && !bMatch) return -1;
-                if (!aMatch && bMatch) return 1;
-                return 0;
-            });
-
-            setCachedSearch(query, results);
-        } catch (err) {
-            dropdown.innerHTML = `<div class="search-no-results">${err.message}</div>`;
-            return;
-        }
-    }
-
-    if (!results.length) {
-        dropdown.innerHTML = `<div class="search-no-results">No results. Try "+ Add Manually"</div>`;
-        return;
-    }
-
-    dropdown.innerHTML = '';
-        results.forEach(item => {
-            const normItemTitle = lib.normalizeTitle(item.title);
-            const inLib = state.library.some(m => lib.normalizeTitle(m.title) === normItemTitle && m.category === item.category);
-            const div = document.createElement('div');
-            div.className = 'search-item';
-            div.tabIndex = 0;
-            div.innerHTML = `
-                ${item.poster ? `<img src="${item.poster}" class="card-poster-placeholder" style="width:40px;height:56px;border-radius:6px;object-fit:cover;">` : `<div class="card-poster-placeholder" style="width:40px;height:56px;font-size:24px;border-radius:6px;background:var(--surface);border:1px solid var(--border);">${ui.CAT_EMOJI[item.category] || '🎬'}</div>`}
-                <div class="search-item-info">
-                    <div class="search-item-title">${escapeHTML(item.title)}</div>
-                    <div class="search-item-meta">${ui.CAT_LABELS[item.category] || ''} · ${escapeHTML(item.year || '?')} · ${escapeHTML(item.genre || '')}</div>
-                </div>
-                ${inLib
-                    ? `<span style="font-size:11px;color:var(--success);font-weight:600;">✓ In Vault</span>`
-                    : `<button class="search-item-add" tabindex="-1" data-title='${JSON.stringify(item).replace(/'/g, "&apos;")}'>+ Add</button>`}`;
-
-            if (!inLib) {
-                div.addEventListener('mousedown', async (e) => {
-                    // Prevent mousedown from triggering blur on the input
-                    e.preventDefault();
-                    
-                    const isAddBtn = e.target.classList.contains('search-item-add');
-                    
-                    if (isAddBtn) {
-                        const btn = div.querySelector('.search-item-add');
-                        if (btn) {
-                            btn.textContent = 'Adding...';
-                            btn.disabled = true;
-                        }
-                        const seasons = await fetchDeepDetails(item);
-                        const media = lib.addMedia(state.library, { ...item, seasons });
-                        ui.showToast(`"${media.title}" added to vault ✓`, 'success');
-                        dropdown.style.display = 'none';
-                        document.getElementById('search-input').value = '';
-                        render();
-                    } else {
-                        // Open Preview Modal
-                        dropdown.style.display = 'none';
-                        document.getElementById('search-input').value = '';
-                        ui.showLoading('Fetching details...');
-                        const seasons = await fetchDeepDetails(item);
-                        ui.hideLoading();
-                        
-                        const previewItem = {
-                            ...item,
-                            id: 'preview_' + Date.now(),
-                            status: 'plan-to-watch',
-                            seasons: seasons,
-                            rating: 0,
-                            notes: '',
-                            addedAt: new Date().toISOString(),
-                            rewatchCount: 0,
-                            tags: []
-                        };
-                        state.previewItem = previewItem;
-                        ui.openDetailModal(previewItem);
-                    }
-                });
-                div.addEventListener('keydown', (e) => { if (e.key === 'Enter') div.dispatchEvent(new MouseEvent('mousedown')); });
-            }
-            dropdown.appendChild(div);
-        });
-}
 
 // ── Sync Handler ────────────────────────────────────────────────
 async function handleRunSync() {
@@ -506,18 +309,41 @@ function bindEvents() {
     // Search
     const searchInput = document.getElementById('search-input');
     const dropdown = document.getElementById('search-dropdown');
-    searchInput.addEventListener('input', () => {
-        clearTimeout(_searchTimer);
-        const q = searchInput.value.trim();
-        if (q.length < 2) { dropdown.style.display = 'none'; return; }
-        _searchTimer = setTimeout(() => searchTitles(q), 500);
+    setupSearch(searchInput, dropdown, state, getCachedSearch, setCachedSearch, lib, async (item) => {
+        // onAdd
+        const seasons = await fetchDeepDetails(item);
+        const media = lib.addMedia(state.library, { ...item, seasons });
+        showToast(`"${media.title}" added to vault ✓`, 'success');
+        dropdown.style.display = 'none';
+        searchInput.value = '';
+        render();
+    }, async (item) => {
+        // onPreview
+        dropdown.style.display = 'none';
+        searchInput.value = '';
+        showLoading('Fetching details...', '', 15000);
+        const seasons = await fetchDeepDetails(item);
+        hideLoading();
+        
+        const previewItem = {
+            ...item,
+            id: 'preview_' + Date.now(),
+            status: 'plan-to-watch',
+            seasons: seasons,
+            rating: 0,
+            notes: '',
+            addedAt: new Date().toISOString(),
+            rewatchCount: 0,
+            tags: []
+        };
+        state.previewItem = previewItem;
+        ui.openDetailModal(previewItem);
     });
-    searchInput.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 200));
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { dropdown.style.display = 'none'; document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); } });
 
     // Manual Add Modal
     document.getElementById('manual-add-btn').addEventListener('click', () => ui.openModal('add-modal'));
-    document.getElementById('add-modal-close').addEventListener('click', () => ui.closeModal('add-modal'));
+    setupModalAccessibility('add-modal', 'add-modal-close', () => ui.closeModal('add-modal'));
     document.getElementById('add-cancel-btn').addEventListener('click', () => ui.closeModal('add-modal'));
     document.getElementById('add-modal').addEventListener('click', e => { if (e.target === e.currentTarget) ui.closeModal('add-modal'); });
 
@@ -573,6 +399,7 @@ function bindEvents() {
                currentData.rating !== (media.rating || 0) || 
                currentData.notes !== (media.notes || '') || 
                currentData.tags.join(',') !== (media.tags || []).join(',') ||
+               currentData.rewatchCount !== (media.rewatchCount || 0) ||
                !seasonsMatch;
     };
 
@@ -589,7 +416,7 @@ function bindEvents() {
         }
     };
 
-    document.getElementById('detail-close').addEventListener('click', handleDetailClose);
+    setupModalAccessibility('detail-modal', 'detail-close', handleDetailClose);
     document.getElementById('detail-cancel-btn').addEventListener('click', handleDetailClose);
     document.getElementById('detail-modal').addEventListener('click', e => { if (e.target === e.currentTarget) handleDetailClose(); });
 
@@ -629,21 +456,21 @@ function bindEvents() {
         }
 
         const media = state.library.find(m => m.id === data.id);
-        ui.renderConfirmModal(
-            'Remove Title', 
-            `Are you sure you want to remove "${media?.title}" from your vault?`, 
-            'Remove',
-            () => {
-                lib.removeMedia(state.library, state.syncResults, data.id);
-                ui.closeModal('detail-modal');
-                render();
-                ui.showToast('Removed from vault', 'info');
-            }
-        );
+        const clonedMedia = JSON.parse(JSON.stringify(media));
+        
+        lib.removeMedia(state.library, state.syncResults, data.id);
+        ui.closeModal('detail-modal');
+        render();
+        
+        ui.showToast(`Removed "${media.title}"`, 'info', 'Undo', () => {
+            lib.addMedia(state.library, clonedMedia);
+            render();
+            ui.showToast(`Restored "${media.title}"`, 'success');
+        }, 5000);
     });
 
     // Settings Modal
-    document.getElementById('settings-close').addEventListener('click', () => ui.closeModal('settings-modal'));
+    setupModalAccessibility('settings-modal', 'settings-close', () => ui.closeModal('settings-modal'));
     document.getElementById('settings-cancel').addEventListener('click', () => ui.closeModal('settings-modal'));
     document.getElementById('settings-modal').addEventListener('click', e => { if (e.target === e.currentTarget) ui.closeModal('settings-modal'); });
 
@@ -676,19 +503,23 @@ function bindEvents() {
     });
 
     document.getElementById('clear-all-btn').addEventListener('click', () => {
-        ui.renderConfirmModal(
-            'Clear ALL Data',
-            'This will permanently delete your entire watch history. This cannot be undone.',
-            'Clear Everything',
-            () => {
-                const res = lib.clearAllData();
-                state.library = res.library;
-                state.syncResults = res.syncResults;
-                ui.closeModal('settings-modal');
-                render();
-                ui.showToast('All data cleared', 'info');
-            }
-        );
+        const clonedLib = JSON.parse(JSON.stringify(state.library));
+        const clonedSync = JSON.parse(JSON.stringify(state.syncResults));
+        
+        const res = lib.clearAllData();
+        state.library = res.library;
+        state.syncResults = res.syncResults;
+        ui.closeModal('settings-modal');
+        render();
+        
+        ui.showToast('All data cleared', 'info', 'Undo', () => {
+            state.library = clonedLib;
+            state.syncResults = clonedSync;
+            lib.saveLibrary(state.library);
+            lib.saveSyncResults(state.syncResults);
+            render();
+            ui.showToast('Data restored', 'success');
+        }, 5000);
     });
 
     // Sync screen actions
