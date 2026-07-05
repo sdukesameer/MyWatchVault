@@ -66,7 +66,7 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
                                 </div>
                             </div>
                         </div>
-                        <button class="btn btn-primary" id="dash-continue-btn" style="flex-shrink:0;padding:8px 20px;font-size:14px;box-shadow:0 4px 12px rgba(255,255,255,0.15);">Play →</button>
+                        <button class="btn btn-primary" id="dash-continue-btn" style="flex-shrink:0;padding:8px 20px;font-size:14px;box-shadow:0 4px 12px rgba(255,255,255,0.15);">Edit →</button>
                     </div>
                 </div>
             `;

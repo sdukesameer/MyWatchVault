@@ -3,10 +3,12 @@
 A polished, personal entertainment tracker with AI-powered sync and personalized recommendations. Track your anime, series, and movies, and let AI tell you when new seasons or sequels drop.
 
 ## Features
-- **Media Library**: Track anime, series, and movies.
-- **Season Tracking**: Track watched episodes vs total episodes per season.
-- **AI Sync**: Automatically checks the internet for new seasons, episodes, or sequels of things you are watching.
-- **Recommendations**: Get personalized recommendations based on what you have liked and completed.
+- **Cinematic Dashboard**: A beautiful full-bleed interface that tracks your watch stats and seamlessly displays your "Continue Watching" items.
+- **Media Library**: Track anime, series, and movies with customizable tagging and watch status.
+- **Season Tracking**: Granular tracking for watched episodes vs total episodes per season.
+- **Smart Deep Sync**: Automatically checks Jikan (Anime) and TMDB (Shows/Movies) for new seasons, episodes, or sequels, automatically updating your watch status.
+- **Auto-Metadata Population**: Manually adding an item by title instantly fetches the official poster, global rating, and synopsis in the background.
+- **AI Recommendations**: Get personalized recommendations based on what you have liked and completed.
 - **Privacy-first / API Key Security**: No API keys are stored in localStorage or exposed to the frontend in production.
 
 ## Quick Start (Local Development)

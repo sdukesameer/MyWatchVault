@@ -381,7 +381,7 @@ function bindEvents() {
     document.getElementById('add-cancel-btn').addEventListener('click', () => ui.closeModal('add-modal'));
     document.getElementById('add-modal').addEventListener('click', e => { if (e.target === e.currentTarget) ui.closeModal('add-modal'); });
 
-    document.getElementById('add-confirm-btn').addEventListener('click', () => {
+    document.getElementById('add-confirm-btn').addEventListener('click', async () => {
         const title = document.getElementById('add-title').value.trim();
         const category = document.getElementById('add-category').value;
         if (!title || !category) { showToast('Fill in title and category', 'error'); return; }
@@ -393,41 +393,62 @@ function bindEvents() {
             return;
         }
 
-        const media = lib.addMedia(state.library, {
+        ui.closeModal('add-modal');
+        showLoading('Finding details...', `Searching for ${title}`);
+
+        let mediaData = {
             title, category,
             year: parseInt(document.getElementById('add-year').value) || null,
             genre: document.getElementById('add-genre').value.trim(),
             status: document.getElementById('add-status').value
-        });
-        
-        ui.closeModal('add-modal');
-        render();
-        showToast('Added! Fetching poster...', 'info');
+        };
 
-        // Async poster fetch
-        setTimeout(async () => {
-            try {
+        try {
+            if (category === 'anime-series' || category === 'anime') {
+                const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=1`);
+                if (jikanRes.ok) {
+                    const sData = await jikanRes.json();
+                    if (sData.data && sData.data[0]) {
+                        const best = sData.data[0];
+                        if (!mediaData.year && best.year) mediaData.year = best.year;
+                        if (!mediaData.genre && best.genres && best.genres.length > 0) {
+                            mediaData.genre = best.genres.map(g => g.name).join(', ');
+                        }
+                        mediaData.description = (best.synopsis || '').slice(0, 300) + (best.synopsis?.length > 300 ? '...' : '');
+                        mediaData.poster = best.images?.jpg?.large_image_url || best.images?.jpg?.image_url;
+                        mediaData.globalRating = best.score ? `${best.score} ★` : null;
+                        mediaData.jikanId = best.mal_id;
+                    }
+                }
+            } else {
                 const endpoint = category.includes('movie') ? 'search-movie' : 'search-tv';
                 const searchData = await callTMDB(endpoint, { query: title }, state.config);
                 if (searchData && searchData.results && searchData.results.length > 0) {
                     const best = searchData.results[0];
-                    if (best.poster_path) {
-                        const posterUrl = `https://image.tmdb.org/t/p/w500${best.poster_path}`;
-                        const updated = { poster: posterUrl, tmdbId: best.id };
-                        if (best.vote_average) updated.globalRating = `${best.vote_average.toFixed(1)} ★`;
-                        lib.updateMedia(state.library, media.id, updated);
-                        render();
+                    if (!mediaData.year && (best.release_date || best.first_air_date)) {
+                        mediaData.year = parseInt((best.release_date || best.first_air_date).split('-')[0]);
                     }
+                    if (best.poster_path) mediaData.poster = `https://image.tmdb.org/t/p/w500${best.poster_path}`;
+                    mediaData.tmdbId = best.id;
+                    if (best.vote_average) mediaData.globalRating = `${best.vote_average.toFixed(1)} ★`;
+                    mediaData.description = (best.overview || '').slice(0, 300) + (best.overview?.length > 300 ? '...' : '');
                 }
-            } catch (err) {
-                console.warn('Failed to fetch poster for manual add:', err);
             }
-        }, 100);
+        } catch (err) {
+            console.warn('Failed to fetch details for manual add:', err);
+        }
+
+        const media = lib.addMedia(state.library, mediaData);
+        
+        hideLoading();
+        render();
+        showToast(`Added "${title}" to your vault`, 'success');
+        
         ['add-title','add-year','add-genre'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('add-category').value = '';
         document.getElementById('add-status').value = 'plan-to-watch';
         
-        setTimeout(() => ui.openDetailModal(media), 300);
+        setTimeout(() => ui.openDetailModal(media), 100);
     });
 
     // Detail Modal
