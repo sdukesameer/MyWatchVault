@@ -1,0 +1,10 @@
+{
+  "name": "watchvault",
+  "version": "1.0.0",
+  "description": "Personal entertainment tracker with AI-powered sync & recommendations",
+  "scripts": {
+    "build-env": "node build-env.js",
+    "dev": "npx serve . -p 3000"
+  },
+  "private": true
+}

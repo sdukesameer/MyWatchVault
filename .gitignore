@@ -1,0 +1,4 @@
+js/env.js
+node_modules/
+.netlify/
+.DS_Store
