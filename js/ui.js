@@ -46,27 +46,26 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
                 progressText = totalEpisodes > 0 ? `Watched ${totalWatched} / ${totalEpisodes} EP` : `Watched ${totalWatched} EP`;
                 progressPercent = totalEpisodes > 0 ? Math.min(100, Math.max(5, (totalWatched / totalEpisodes) * 100)) : 5;
             }
-            const posterHTML = continueItem.poster 
-                ? `<img src="${escapeHTML(continueItem.poster)}" alt="Poster" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:0;opacity:0.4;">`
-                : `<div style="position:absolute;top:0;left:0;width:100%;height:100%;background:var(--bg-card);z-index:0;display:flex;align-items:center;justify-content:center;font-size:100px;opacity:0.1">${CAT_EMOJI[continueItem.category] || '🎬'}</div>`;
+            const posterHTML = continueItem.poster
+                ? `<img class="continue-hero-bg" src="${escapeHTML(continueItem.poster)}" alt="">`
+                : `<div class="continue-hero-bg continue-hero-fallback">${CAT_EMOJI[continueItem.category] || '🎬'}</div>`;
 
             continueWrap.innerHTML = `
-                <div style="position:relative;width:100%;height:100%;min-height:220px;background:#000;display:flex;flex-direction:column;justify-content:flex-end;padding:24px;box-sizing:border-box;">
+                <div class="continue-hero">
                     ${posterHTML}
-                    <div style="position:absolute;bottom:0;left:0;right:0;height:100%;background:linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.4) 50%, transparent 100%);z-index:1;pointer-events:none;"></div>
-                    
-                    <div style="position:relative;z-index:2;display:flex;justify-content:space-between;align-items:flex-end;gap:15px;">
-                        <div style="flex:1;">
-                            <p style="margin:0 0 6px 0;font-size:11px;color:var(--accent);text-transform:uppercase;font-weight:700;letter-spacing:1px;">Continue Watching</p>
-                            <h3 style="margin:0 0 8px 0;font-size:24px;line-height:1.2;color:#fff;text-shadow:0 2px 4px rgba(0,0,0,0.8);">${escapeHTML(continueItem.title)}</h3>
-                            <div style="display:flex;align-items:center;gap:10px;">
-                                <p style="margin:0;font-size:13px;color:#ddd;font-weight:500;">${progressText}</p>
-                                <div style="flex:1;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;overflow:hidden;max-width:120px;">
-                                    <div style="height:100%;width:${progressPercent}%;background:var(--accent);border-radius:2px;"></div>
+                    <div class="continue-hero-scrim"></div>
+                    <div class="continue-hero-content">
+                        <p class="continue-eyebrow">Continue Watching</p>
+                        <h3 class="continue-hero-title">${escapeHTML(continueItem.title)}</h3>
+                        <div class="continue-hero-footer">
+                            <div class="continue-hero-progress">
+                                <p class="continue-progress-text">${escapeHTML(progressText)}</p>
+                                <div class="continue-bar">
+                                    <div class="continue-bar-fill" style="width:${progressPercent}%"></div>
                                 </div>
                             </div>
+                            <button class="btn btn-primary continue-edit-btn" id="dash-continue-btn">Edit →</button>
                         </div>
-                        <button class="btn btn-primary" id="dash-continue-btn" style="flex-shrink:0;padding:8px 20px;font-size:14px;box-shadow:0 4px 12px rgba(255,255,255,0.15);">Edit →</button>
                     </div>
                 </div>
             `;

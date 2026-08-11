@@ -84,6 +84,9 @@ body::after {
   padding: 0 32px;
 }
 
+/* Breathing room between the sticky navbar and the dashboard. */
+#screen-library .container { padding-top: 32px; }
+
 .screen {
   display: none;
   min-height: calc(100vh - 62px);
@@ -218,6 +221,16 @@ select.input-field {
 /* Responsive */
 @media (max-width: 768px) {
   .container { padding: 0 16px; }
+  #screen-library .container { padding-top: 20px; }
   .navbar { padding: 0 16px; }
   .hero { grid-template-columns: 1fr; }
+}
+
+/* Collapse the nav buttons to their icons so the header never overflows on phones. */
+@media (max-width: 620px) {
+  .navbar { padding: 0 12px; gap: 10px; }
+  .nav-brand { font-size: 21px; letter-spacing: 1px; }
+  .nav-actions { gap: 6px; }
+  .nav-actions .btn-label { display: none; }
+  .nav-actions .btn-sm { padding: 7px 10px; font-size: 15px; }
 }

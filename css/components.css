@@ -129,6 +129,14 @@
   z-index: 100; max-height: 300px; overflow-y: auto;
   animation: dropIn 0.15s ease;
 }
+
+/* Stack the search field above its buttons instead of squeezing it. */
+@media (max-width: 620px) {
+  .add-bar { flex-wrap: wrap; }
+  .add-bar .input-field { flex: 1 0 100%; }
+  .add-bar .btn { flex: 1; }
+  .search-dropdown { right: 0; }
+}
 @keyframes dropIn {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -290,6 +298,9 @@
 @media (max-width: 768px) {
   .modal-card { margin: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; max-height: 95vh; }
   .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal-header { padding: 20px 18px 16px; }
+  .modal-body { padding: 18px; }
+  .modal-footer { padding: 14px 18px 20px; flex-wrap: wrap; }
 }
 
 /* Detail Modal Layout */
@@ -556,39 +567,62 @@
 
 /* Continue Content */
 .continue-content {
-  flex: 1; display: flex; align-items: center;
+  flex: 1; display: flex; align-items: stretch;
 }
 .continue-empty {
-  color: var(--text-muted); font-size: 14px; font-style: italic;
+  color: var(--text-muted); font-size: 14px; font-style: italic; padding: 20px;
 }
-.continue-card {
-  display: flex; gap: 20px; width: 100%;
+
+.continue-hero {
+  position: relative; width: 100%; min-height: 240px;
+  background: #000; display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 24px;
 }
-.continue-poster {
-  width: 120px; height: 180px; object-fit: cover; border-radius: var(--r-md);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5); background: var(--surface);
+.continue-hero-bg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; z-index: 0; opacity: 0.4;
 }
-@media (max-width: 500px) {
-  .continue-card { flex-direction: column; }
-  .continue-poster { width: 100px; height: 150px; }
+.continue-hero-fallback {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface); font-size: 100px; opacity: 0.12;
 }
-.continue-info {
-  flex: 1; display: flex; flex-direction: column; justify-content: center;
+.continue-hero-scrim {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.45) 55%, transparent 100%);
 }
-.continue-title {
-  font-size: 24px; font-weight: 700; margin-bottom: 6px;
+.continue-hero-content { position: relative; z-index: 2; }
+
+.continue-eyebrow {
+  margin: 0 0 6px; font-size: 11px; color: var(--accent);
+  text-transform: uppercase; font-weight: 700; letter-spacing: 1px;
 }
-.continue-meta {
-  font-size: 13px; color: var(--text-dim); margin-bottom: 16px;
+.continue-hero-title {
+  margin: 0 0 12px; font-size: clamp(19px, 4.5vw, 26px); line-height: 1.2;
+  color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+  overflow-wrap: anywhere;
 }
+.continue-hero-footer {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+}
+.continue-hero-progress { flex: 1; min-width: 0; }
 .continue-progress-text {
-  font-size: 14px; font-weight: 600; color: var(--accent); margin-bottom: 8px;
+  margin: 0 0 8px; font-size: 13px; color: #ddd; font-weight: 500;
 }
 .continue-bar {
-  width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 999px; overflow: hidden; margin-bottom: 16px;
+  width: 100%; max-width: 220px; height: 5px;
+  background: rgba(255,255,255,0.2); border-radius: 999px; overflow: hidden;
 }
 .continue-bar-fill {
   height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 999px;
+}
+.continue-edit-btn { flex-shrink: 0; }
+
+/* On narrow screens the button gets its own row so it never crushes the progress bar. */
+@media (max-width: 560px) {
+  .continue-hero { padding: 18px; min-height: 200px; }
+  .continue-hero-footer { flex-direction: column; align-items: stretch; gap: 14px; }
+  .continue-bar { max-width: none; }
+  .continue-edit-btn { width: 100%; }
 }
 
 /* Upcoming List */
