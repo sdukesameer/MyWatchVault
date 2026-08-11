@@ -23,12 +23,9 @@ export function getStats(library) {
 
     library.forEach(m => {
         if (catCounts[m.category] !== undefined) catCounts[m.category]++;
-        if (m.globalRating) {
-            const parsed = parseFloat(m.globalRating);
-            if (!isNaN(parsed) && parsed > 0) {
-                sumRating += parsed;
-                ratedCount++;
-            }
+        if (m.rating > 0) {
+            sumRating += m.rating;
+            ratedCount++;
         }
         
         if (m.genre) {
@@ -68,21 +65,29 @@ export function getStats(library) {
     return cachedStats;
 }
 
+const recency = m => new Date(m.updatedAt || m.addedAt || 0);
+
 export function getDashboardItems(library) {
-    const watching = library.filter(m => m.status === 'watching');
-    watching.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
-    let continueItem = watching.length > 0 ? watching[0] : null;
+    const watching = library
+        .filter(m => m.status === 'watching')
+        .sort((a, b) => recency(b) - recency(a));
+
+    let continueItem = watching[0] || null;
 
     if (!continueItem) {
-        const planToWatch = library.filter(m => m.status === 'plan-to-watch');
+        const planToWatch = library
+            .filter(m => m.status === 'plan-to-watch')
+            .sort((a, b) => recency(b) - recency(a));
         if (planToWatch.length > 0) {
-            continueItem = planToWatch[Math.floor(Math.random() * planToWatch.length)];
-            continueItem = { ...continueItem, isFallback: true };
+            continueItem = { ...planToWatch[0], isFallback: true };
         }
     }
 
-    let upcoming = library.filter(m => m.hasNew || m.status === 'plan-to-watch');
-    upcoming = upcoming.sort(() => 0.5 - Math.random()).slice(0, 3);
+    // hasNew first, then plan-to-watch; stable so the panel doesn't reshuffle on every render.
+    const upcoming = library
+        .filter(m => m.hasNew || m.status === 'plan-to-watch')
+        .sort((a, b) => (b.hasNew ? 1 : 0) - (a.hasNew ? 1 : 0) || recency(b) - recency(a))
+        .slice(0, 3);
 
     return { continueItem, upcoming };
 }

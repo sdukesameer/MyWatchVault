@@ -14,11 +14,21 @@ export class StorageCorruptionError extends Error {
 export function loadLibrary() {
     const raw = localStorage.getItem(DB_KEY);
     if (!raw) return []; // First time user
-    try { 
-        return JSON.parse(raw); 
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) throw new Error('not an array');
+        return parsed;
     } catch (e) {
         throw new StorageCorruptionError('WatchVault library data is corrupted.');
     }
+}
+
+// Last-resort recovery from the snapshot saveLibrary() takes every 10 edits.
+export function loadBackupLibrary() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(DB_KEY + '_backup_previous') || 'null');
+        return Array.isArray(parsed) ? parsed : null;
+    } catch { return null; }
 }
 
 let editCounter = 0;
@@ -181,68 +191,6 @@ export function getFilteredLibrary(lib, cat, statusFilter, genreFilter, ratingFi
     }
     
     return filtered;
-}
-
-export function getStats(lib, syncResults) {
-    let totalEpisodes = 0;
-    let totalMinutes = 0;
-    let totalRating = 0;
-    let ratedCount = 0;
-    let genreCounts = {};
-
-    lib.forEach(m => {
-        if (m.category === 'movie' || m.category === 'anime-movie') {
-            if (m.status === 'completed') {
-                totalEpisodes += 1;
-                totalMinutes += 120;
-            } else if (m.status === 'watching') {
-                totalMinutes += 60;
-            }
-        } else {
-            const watchedEps = m.seasons?.reduce((acc, s) => acc + (parseInt(s.watched) || 0), 0) || 0;
-            totalEpisodes += watchedEps;
-            const minsPerEp = m.category.includes('anime') ? 24 : 45;
-            totalMinutes += (watchedEps * minsPerEp);
-        }
-
-        if (m.rating > 0) {
-            totalRating += m.rating;
-            ratedCount += 1;
-        }
-
-        if (m.genre) {
-            m.genre.split(',').forEach(g => {
-                const clean = g.trim();
-                if (clean && clean !== 'Anime' && clean !== 'Series' && clean !== 'Movie') {
-                    genreCounts[clean] = (genreCounts[clean] || 0) + 1;
-                }
-            });
-        }
-    });
-
-    let topGenre = '-';
-    let max = 0;
-    for (const [g, count] of Object.entries(genreCounts)) {
-        if (count > max) { max = count; topGenre = g; }
-    }
-
-    return {
-        total: lib.length,
-        watching: lib.filter(m => m.status === 'watching').length,
-        completed: lib.filter(m => m.status === 'completed').length,
-        newCount: lib.filter(m => m.hasNew && syncResults[m.id]).length,
-        catCounts: {
-            'all': lib.length,
-            'anime-series': lib.filter(m => m.category === 'anime-series').length,
-            'anime-movie': lib.filter(m => m.category === 'anime-movie').length,
-            'series': lib.filter(m => m.category === 'series').length,
-            'movie': lib.filter(m => m.category === 'movie').length,
-        },
-        hoursWatched: Math.floor(totalMinutes / 60),
-        totalEpisodes,
-        avgRating: ratedCount ? (totalRating / ratedCount).toFixed(1) : '0.0',
-        topGenre
-    };
 }
 
 export function exportLibrary(lib, syncResults) {

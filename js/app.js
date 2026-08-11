@@ -272,13 +272,7 @@ async function handleFetchRecos(append = false) {
             state.previewItem = previewItem;
             openDetail(previewItem);
         };
-        
-        window.openPreviewItem = (idx) => {
-            const previewItem = allRecosLoaded[idx];
-            state.previewItem = { ...previewItem, id: 'preview_' + Date.now(), status: 'plan-to-watch', seasons: [] };
-            openDetail(state.previewItem);
-        };
-        
+
         renderRecommendations(allRecosLoaded, state.library, recoCallback, openDetail);
         
         document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
@@ -296,11 +290,7 @@ function bindEvents() {
         ui.showScreen('screen-sync'); 
         renderSyncScreen(state.library, state.syncResults); 
     });
-    document.getElementById('sync-nav-btn2')?.addEventListener('click', () => { 
-        ui.showScreen('screen-sync'); 
-        renderSyncScreen(state.library, state.syncResults); 
-    });
-    document.getElementById('reco-nav-btn').addEventListener('click', () => { 
+    document.getElementById('reco-nav-btn').addEventListener('click', () => {
         ui.showScreen('screen-reco'); 
         handleFetchRecos(); 
     });
@@ -348,7 +338,7 @@ function bindEvents() {
             showToast("Your Plan to Watch list is empty!", "info");
             return;
         }
-        const randomItem = state.library[Math.floor(Math.random() * state.library.length)];
+        const randomItem = pool[Math.floor(Math.random() * pool.length)];
         openDetail(randomItem);
     });
 
@@ -370,8 +360,8 @@ function bindEvents() {
         showLoading('Fetching details...', '', 15000);
         const seasons = await fetchDeepDetails(item);
         hideLoading();
-        
-        state.previewItem = { ...item, id: 'preview_' + Date.now(), status: 'plan-to-watch', seasons: [] };
+
+        state.previewItem = { ...item, id: 'preview_' + Date.now(), status: 'plan-to-watch', seasons };
         openDetail(state.previewItem);
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { dropdown.style.display = 'none'; document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); } });
@@ -405,7 +395,7 @@ function bindEvents() {
         };
 
         try {
-            if (category === 'anime-series' || category === 'anime') {
+            if (category.startsWith('anime')) {
                 const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=1`);
                 if (jikanRes.ok) {
                     const sData = await jikanRes.json();
@@ -497,6 +487,7 @@ function bindEvents() {
                currentData.category !== media.category ||
                currentData.notes !== (media.notes || '') || 
                currentData.tags.join(',') !== (media.tags || []).join(',') ||
+               currentData.rating !== (media.rating || 0) ||
                currentData.rewatchCount !== (media.rewatchCount || 0) ||
                !seasonsMatch;
     };
@@ -537,7 +528,7 @@ function bindEvents() {
             render();
             showToast('Added to vault ✓', 'success');
         } else {
-            if (lib.updateMedia(state.library, data.id, data)) {
+            if (lib.updateMedia(state.library, data.id, { ...data, updatedAt: new Date().toISOString() })) {
                 ui.closeModal('detail-modal');
                 render();
                 showToast('Saved ✓', 'success');
@@ -557,17 +548,26 @@ function bindEvents() {
             detailCache.delete(media.category + '_' + (media.jikanId || media.tvmazeId || media.tmdbId || media.title));
             const newSeasons = await fetchDeepDetails(media);
             
-            // Merge seasons (preserve watched count)
+            // Merge seasons, preferring watched counts the user has typed but not yet saved.
             if (newSeasons && newSeasons.length > 0) {
                 newSeasons.forEach(ns => {
+                    const edited = (data.seasons || []).find(s => s.number === ns.number);
                     const existing = (media.seasons || []).find(s => s.number === ns.number);
-                    if (existing) ns.watched = existing.watched;
+                    if (edited) ns.watched = edited.watched;
+                    else if (existing) ns.watched = existing.watched;
                 });
                 media.seasons = newSeasons;
-                
-                const data = ui.collectDetailData();
+
+                // Carry the user's in-progress edits across the re-render so Sync never discards them.
+                media.notes = data.notes;
+                media.tags = data.tags;
+                media.rating = data.rating;
+                media.category = data.category;
+                media.rewatchCount = data.rewatchCount;
+                media.status = data.status;
+
                 openDetail(media);
-                
+
                 // Update sync results if not a preview
                 if (!data.id.startsWith('preview_')) {
                     const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
@@ -655,23 +655,35 @@ function bindEvents() {
     });
 
     document.getElementById('clear-all-btn').addEventListener('click', () => {
-        const clonedLib = JSON.parse(JSON.stringify(state.library));
-        const clonedSync = JSON.parse(JSON.stringify(state.syncResults));
-        
-        const res = lib.clearAllData();
-        state.library = res.library;
-        state.syncResults = res.syncResults;
-        ui.closeModal('settings-modal');
-        render();
-        
-        showToast('All data cleared', 'info', 'Undo', () => {
-            state.library = clonedLib;
-            state.syncResults = clonedSync;
-            lib.saveLibrary(state.library);
-            lib.saveSyncResults(state.syncResults);
-            render();
-            showToast('Data restored', 'success');
-        }, 5000);
+        if (state.library.length === 0) {
+            showToast('Your vault is already empty', 'info');
+            return;
+        }
+
+        ui.renderConfirmModal(
+            'Clear All Data',
+            `This will permanently delete all ${state.library.length} titles and their watch progress. Export a backup first if you want to keep them.`,
+            'Delete Everything',
+            () => {
+                const clonedLib = JSON.parse(JSON.stringify(state.library));
+                const clonedSync = JSON.parse(JSON.stringify(state.syncResults));
+
+                const res = lib.clearAllData();
+                state.library = res.library;
+                state.syncResults = res.syncResults;
+                ui.closeModal('settings-modal');
+                render();
+
+                showToast('All data cleared', 'info', 'Undo', () => {
+                    state.library = clonedLib;
+                    state.syncResults = clonedSync;
+                    lib.saveLibrary(state.library);
+                    lib.saveSyncResults(state.syncResults);
+                    render();
+                    showToast('Data restored', 'success');
+                }, 8000);
+            }
+        );
     });
 
     // Sync screen actions
@@ -680,9 +692,6 @@ function bindEvents() {
             handleRunSync();
         }
     });
-
-    // Reco actions
-    document.getElementById('refresh-reco-btn').addEventListener('click', handleFetchRecos);
 }
 
 // ── Initialization ──────────────────────────────────────────────
@@ -690,9 +699,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadEnvKeys();
     loadConfig();
     
-    state.library = lib.loadLibrary();
+    try {
+        state.library = lib.loadLibrary();
+    } catch (err) {
+        const backup = lib.loadBackupLibrary();
+        state.library = backup || [];
+        setTimeout(() => showToast(
+            backup
+                ? 'Library data was corrupted — restored your last backup.'
+                : 'Library data was corrupted and could not be recovered.',
+            'error', null, null, 8000
+        ), 500);
+    }
     state.syncResults = lib.loadSyncResults();
-    
+
+    document.getElementById('add-year').max = new Date().getFullYear() + 5;
+
     bindEvents();
     render();
 

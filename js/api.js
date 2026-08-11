@@ -54,7 +54,7 @@ async function callViaProxy(prompt) {
     }
 }
 
-export async function callTMDB(proxyEndpoint, params, config) {
+export async function callTMDB(proxyEndpoint, params, config, signal) {
     if (config && config.tmdbKey && !isProxied()) {
         let url = '';
         const tmdbKey = config.tmdbKey;
@@ -62,13 +62,13 @@ export async function callTMDB(proxyEndpoint, params, config) {
         else if (proxyEndpoint === 'search-tv') url = `https://api.themoviedb.org/3/search/tv?api_key=${tmdbKey}&query=${encodeURIComponent(params.query)}`;
         else if (proxyEndpoint === 'tv-details') url = `https://api.themoviedb.org/3/tv/${params.tvId}?api_key=${tmdbKey}`;
         else if (proxyEndpoint === 'movie-details') url = `https://api.themoviedb.org/3/movie/${params.tvId}?api_key=${tmdbKey}`;
-        
-        const res = await fetch(url);
+
+        const res = await fetch(url, { signal });
         if (!res.ok) throw new Error(`TMDB error ${res.status}`);
         return await res.json();
     } else {
         const queryParams = new URLSearchParams({ endpoint: proxyEndpoint, ...params });
-        const res = await fetch(`${PROXY_TMDB}?${queryParams.toString()}`);
+        const res = await fetch(`${PROXY_TMDB}?${queryParams.toString()}`, { signal });
         if (!res.ok) {
             const errText = await res.text().catch(()=>'');
             throw new Error(`TMDB proxy error ${res.status}: ${errText}`);

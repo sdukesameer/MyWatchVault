@@ -4,6 +4,7 @@
 import { callAI, extractJSON } from './api.js';
 import { CAT_LABELS, CAT_EMOJI } from './constants.js';
 import { escapeHTML } from './utils.js';
+import { normalizeTitle } from './library.js';
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
@@ -91,7 +92,9 @@ export function renderRecommendations(items, library, onQuickAdd, onOpenDetail) 
     }
     
     items.forEach(item => {
-        const inLib = library.some(m => m.title.toLowerCase() === item.title.toLowerCase());
+        const normTitle = normalizeTitle(item.title);
+        const vaultItem = library.find(m => normalizeTitle(m.title) === normTitle);
+        const inLib = Boolean(vaultItem);
         const card = document.createElement('div');
         card.className = 'media-card'; // Use media-card class so it shares the grid styling
         
@@ -120,30 +123,24 @@ export function renderRecommendations(items, library, onQuickAdd, onOpenDetail) 
                 <div style="font-size:11px;color:var(--text-dim);margin-top:6px;font-style:italic;">
                     🎯 ${escapeHTML(item.whyYouLikeIt || item.description || '')}
                 </div>
-                ${inLib 
+                ${inLib
                     ? `<button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;color:var(--success);border-color:var(--success);width:100%;">✓ In Vault</button>`
-                    : `<button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;width:100%;" data-item='${JSON.stringify(item).replace(/'/g, "&apos;")}'>Preview</button>`
+                    : `<button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;width:100%;">Preview</button>`
                 }
             </div>`;
 
-        card.tabIndex = 0;
-        card.addEventListener('click', (e) => {
+        const activate = () => {
             if (inLib) {
-                const vaultItem = library.find(m => m.title.toLowerCase() === item.title.toLowerCase());
-                if (vaultItem && onOpenDetail) onOpenDetail(vaultItem.id);
+                if (onOpenDetail) onOpenDetail(vaultItem.id);
             } else {
                 onQuickAdd(item);
             }
-        });
-        card.addEventListener('keydown', (e) => { 
-            if (e.key === 'Enter') {
-                if (inLib) {
-                    const vaultItem = library.find(m => m.title.toLowerCase() === item.title.toLowerCase());
-                    if (vaultItem && onOpenDetail) onOpenDetail(vaultItem.id);
-                } else {
-                    onQuickAdd(item);
-                }
-            } 
+        };
+
+        card.tabIndex = 0;
+        card.addEventListener('click', activate);
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') activate();
         });
         grid.appendChild(card);
     });

@@ -11,6 +11,8 @@
     <meta property="og:description" content="Personal AI-powered media tracker for movies, series, and anime.">
     <meta property="og:type" content="website">
     
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎬%3C/text%3E%3C/svg%3E">
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -203,10 +205,14 @@
                             <button class="btn btn-secondary btn-sm" id="rewatch-btn">+ Log Rewatch</button>
                         </div>
                     </div>
-                    <div style="display:flex;gap:15px;align-items:center;margin-bottom:15px;">
+                    <div style="display:flex;gap:15px;align-items:flex-start;margin-bottom:15px;">
                         <div>
                             <div class="field-label">Global Rating</div>
                             <div id="detail-global-rating" style="font-size: 16px; font-weight: 600; color: var(--accent);">—</div>
+                        </div>
+                        <div>
+                            <div class="field-label">Your Rating</div>
+                            <div class="rating-stars" id="detail-rating" data-value="0"></div>
                         </div>
                         <div style="flex:1">
                             <div class="field-label">Category</div>

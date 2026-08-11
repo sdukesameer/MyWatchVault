@@ -5,6 +5,7 @@ A polished, personal entertainment tracker with AI-powered sync and personalized
 ## Features
 - **Cinematic Dashboard**: A beautiful full-bleed interface that tracks your watch stats and seamlessly displays your "Continue Watching" items.
 - **Media Library**: Track anime, series, and movies with customizable tagging and watch status.
+- **Personal Ratings**: Rate anything 1–5 stars. Ratings drive the sort, the rating filter, your average-rating stat, and the AI's taste profile. Click a star again to clear it.
 - **Season Tracking**: Granular tracking for watched episodes vs total episodes per season.
 - **Smart Deep Sync**: Automatically checks Jikan (Anime) and TMDB (Shows/Movies) for new seasons, episodes, or sequels, automatically updating your watch status.
 - **Auto-Metadata Population**: Manually adding an item by title instantly fetches the official poster, global rating, and synopsis in the background.

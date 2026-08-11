@@ -169,6 +169,7 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
                     ${media.year ? `<span>${escapeHTML(media.year.toString())}</span>` : ''}
                     ${media.genre ? `<span>${escapeHTML(media.genre.split(',')[0])}</span>` : ''}
                     ${media.globalRating ? `<span title="Global Rating">🌐 ${escapeHTML(media.globalRating)}</span>` : ''}
+                    ${media.rating > 0 ? `<span title="Your Rating" style="color:var(--accent3)">${'★'.repeat(media.rating)}</span>` : ''}
                 </div>
                 ${progressHTML}
                 ${tagsHTML}
@@ -260,7 +261,8 @@ export function openDetailModal(media) {
     ).join('');
 
     document.getElementById('detail-global-rating').textContent = media.globalRating || '—';
-    
+    renderRatingStars(media.rating || 0);
+
     document.getElementById('detail-tags').value = (media.tags || []).join(', ');
     document.getElementById('detail-notes').value = media.notes || '';
 
@@ -273,6 +275,29 @@ export function openDetailModal(media) {
     }
 
     openModal('detail-modal');
+}
+
+function renderRatingStars(rating) {
+    const wrap = document.getElementById('detail-rating');
+    if (!wrap) return;
+
+    wrap.dataset.value = rating;
+    wrap.innerHTML = [1, 2, 3, 4, 5].map(n =>
+        `<span class="star ${n <= rating ? 'filled' : 'empty'}" data-value="${n}" role="button" tabindex="0"
+               title="Rate ${n} star${n !== 1 ? 's' : ''}" aria-label="Rate ${n} star${n !== 1 ? 's' : ''}">★</span>`
+    ).join('');
+
+    wrap.querySelectorAll('.star').forEach(star => {
+        const setRating = () => {
+            const clicked = parseInt(star.dataset.value);
+            // Clicking the current rating clears it, so a misclick is recoverable.
+            renderRatingStars(clicked === parseInt(wrap.dataset.value) ? 0 : clicked);
+        };
+        star.addEventListener('click', setRating);
+        star.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRating(); }
+        });
+    });
 }
 
 export function renderSeasons(seasons) {
@@ -397,6 +422,7 @@ export function collectDetailData() {
         status: document.querySelector('#status-selector .status-opt.active')?.dataset.status || 'plan-to-watch',
         notes: document.getElementById('detail-notes').value,
         tags: tags,
+        rating: parseInt(document.getElementById('detail-rating').dataset.value) || 0,
         rewatchCount: parseInt(rewatchText) || 0,
         seasons: Array.from(document.querySelectorAll('#seasons-grid .season-row')).map((row, idx) => {
             const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
