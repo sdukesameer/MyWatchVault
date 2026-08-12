@@ -103,7 +103,48 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
     }
 }
 
-export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, isFiltered = false) {
+// Splits the library into labelled sections for the "Group by" control.
+function groupLibrary(items, groupBy) {
+    if (!groupBy || groupBy === 'none') return [{ label: null, items }];
+
+    const buckets = new Map();
+    const keyFor = m => {
+        switch (groupBy) {
+            case 'status': return STATUS_LABELS[m.status] || 'Unknown';
+            case 'category': return CAT_LABELS[m.category] || 'Unknown';
+            case 'rating': return m.rating > 0 ? `${'★'.repeat(m.rating)} (${m.rating})` : 'Unrated';
+            case 'genre': return String(m.genre || '').split(',')[0].trim() || 'No genre';
+            default: return 'All';
+        }
+    };
+    items.forEach(m => {
+        const k = keyFor(m);
+        if (!buckets.has(k)) buckets.set(k, []);
+        buckets.get(k).push(m);
+    });
+
+    const order = groupBy === 'status'
+        ? ['Watching', 'Plan to Watch', 'On Hold', 'Completed', 'Dropped']
+        : null;
+
+    return [...buckets.entries()]
+        .sort((a, b) => {
+            if (order) {
+                const ai = order.indexOf(a[0]), bi = order.indexOf(b[0]);
+                return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+            }
+            if (groupBy === 'rating') {
+                // Highest rating first, with "Unrated" last.
+                const num = s => (s.match(/\((\d)\)/) ? parseInt(s.match(/\((\d)\)/)[1]) : -1);
+                return num(b[0]) - num(a[0]);
+            }
+            return a[0].localeCompare(b[0]);
+        })
+        .map(([label, groupItems]) => ({ label, items: groupItems }));
+}
+
+export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, isFiltered = false,
+                           { groupBy = 'none', selectMode = false, selectedIds = new Set(), onToggleSelect } = {}) {
     const grid = document.getElementById('media-grid');
 
     if (!filteredLib.length) {
@@ -122,9 +163,19 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, is
     }
 
     grid.innerHTML = '';
-    filteredLib.forEach(media => {
+    const groups = groupLibrary(filteredLib, groupBy);
+    groups.forEach(group => {
+      if (group.label) {
+        const heading = document.createElement('div');
+        heading.className = 'group-heading';
+        heading.innerHTML = `${escapeHTML(group.label)}<span class="group-count">${group.items.length}</span>`;
+        grid.appendChild(heading);
+      }
+      group.items.forEach(media => {
         const card = document.createElement('div');
         card.className = 'media-card';
+        if (selectMode) card.classList.add('selectable');
+        if (selectedIds.has(media.id)) card.classList.add('selected');
         card.dataset.id = media.id;
         card.tabIndex = 0;
 
@@ -165,7 +216,9 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, is
                     <span>${CAT_EMOJI[media.category] || '🎬'}</span>
                     <span>${escapedTitle.slice(0, 18)}</span>
                 </div>
-                <div class="card-badge ${media.category?.split('-')[0]}">${CAT_LABELS[media.category] || 'Unknown'}</div>
+                ${selectMode
+                    ? `<div class="card-select-box">${selectedIds.has(media.id) ? '✓' : ''}</div>`
+                    : `<div class="card-badge ${media.category?.split('-')[0]}">${CAT_LABELS[media.category] || 'Unknown'}</div>`}
                 <div class="card-status-dot ${statusDotClass}" title="${STATUS_LABELS[media.status] || ''}"></div>
                 ${newBadge}
             </div>
@@ -181,9 +234,12 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, is
                 ${tagsHTML}
             </div>`;
 
-        card.addEventListener('click', () => onCardClick(media.id));
-        card.addEventListener('keydown', (e) => { if (e.key === 'Enter') onCardClick(media.id); });
+        // In select mode a click toggles selection instead of opening the item.
+        const activate = () => (selectMode ? onToggleSelect?.(media.id) : onCardClick(media.id));
+        card.addEventListener('click', activate);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter') activate(); });
         grid.appendChild(card);
+      });
     });
 }
 
@@ -442,6 +498,58 @@ function cycleSeasonState(row) {
     updateOverallStatusFromSeasons();
 }
 
+// Small popup anchored to a button, letting the user pick which status to add/set.
+const STATUS_ORDER = ['plan-to-watch', 'watching', 'completed', 'on-hold', 'dropped'];
+let openStatusMenu = null;
+
+export function closeStatusMenu() {
+    if (openStatusMenu) { openStatusMenu.remove(); openStatusMenu = null; }
+}
+
+export function showStatusMenu(anchorEl, onPick, { heading = 'Add as…' } = {}) {
+    closeStatusMenu();
+
+    const menu = document.createElement('div');
+    menu.className = 'status-menu';
+    menu.innerHTML = `
+        <div class="status-menu-head">${escapeHTML(heading)}</div>
+        ${STATUS_ORDER.map(s => `
+            <button class="status-menu-item" data-status="${s}">
+                <span class="status-menu-dot ${s}"></span>${escapeHTML(STATUS_LABELS[s])}
+            </button>`).join('')}`;
+
+    document.body.appendChild(menu);
+
+    // Anchor below the button, flipping/clamping so it stays on screen.
+    const r = anchorEl.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+    let left = Math.min(r.left, window.innerWidth - mw - 8);
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.left = `${Math.round(Math.max(8, left))}px`;
+
+    menu.querySelectorAll('.status-menu-item').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const status = btn.dataset.status;
+            closeStatusMenu();
+            onPick(status);
+        });
+    });
+
+    // Defer so the click that opened the menu doesn't immediately close it.
+    setTimeout(() => {
+        const away = (e) => {
+            if (!menu.contains(e.target)) { closeStatusMenu(); document.removeEventListener('click', away); }
+        };
+        document.addEventListener('click', away);
+    }, 0);
+
+    openStatusMenu = menu;
+    return menu;
+}
+
 export function renderSimilar(items, { loading = false, onAdd, ownedTitles = new Set() } = {}) {
     const section = document.getElementById('similar-section');
     const list = document.getElementById('similar-list');
@@ -480,12 +588,16 @@ export function renderSimilar(items, { loading = false, onAdd, ownedTitles = new
 
         if (!owned) {
             const btn = card.querySelector('.similar-add');
-            btn.addEventListener('click', async () => {
-                btn.disabled = true;
-                btn.textContent = 'Adding…';
-                const ok = await onAdd?.(item);
-                btn.textContent = ok ? '✓ In Vault' : '+ Add';
-                btn.disabled = Boolean(ok);
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Pick the watch status instead of always defaulting to Plan to Watch.
+                showStatusMenu(btn, async (status) => {
+                    btn.disabled = true;
+                    btn.textContent = 'Adding…';
+                    const ok = await onAdd?.(item, status);
+                    btn.textContent = ok ? '✓ In Vault' : '+ Add';
+                    btn.disabled = Boolean(ok);
+                });
             });
         }
         list.appendChild(card);

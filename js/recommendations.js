@@ -4,6 +4,7 @@
 import { callAI, extractJSON, jikanFetch, fetchJSONRetry, kitsuAnime, findPosterFallback, callTMDB } from './api.js';
 import { CAT_LABELS, CAT_EMOJI } from './constants.js';
 import { escapeHTML } from './utils.js';
+import { showStatusMenu } from './ui.js';
 import { normalizeTitle } from './library.js';
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
@@ -102,7 +103,7 @@ export async function enhanceRecommendation(item, config) {
     return item;
 }
 
-export function renderRecommendations(items, library, onQuickAdd, onOpenDetail) {
+export function renderRecommendations(items, library, onQuickAdd, onOpenDetail, onAddWithStatus) {
     const grid = document.getElementById('reco-grid');
     if (!grid) return;
     
@@ -152,18 +153,72 @@ export function renderRecommendations(items, library, onQuickAdd, onOpenDetail) 
                 <div style="font-size:11px;color:var(--text-dim);margin-top:6px;font-style:italic;">
                     🎯 ${escapeHTML(item.whyYouLikeIt || item.description || '')}
                 </div>
-                <button class="btn btn-secondary btn-sm reco-add-btn" style="margin-top:10px;width:100%;">Preview</button>
+                <div class="reco-actions">
+                    <button class="btn btn-secondary btn-sm reco-preview-btn">Preview</button>
+                    <button class="btn btn-primary btn-sm reco-add-now-btn">+ Add</button>
+                </div>
             </div>`;
 
-        const activate = () => onQuickAdd(item);
+        const preview = () => onQuickAdd(item);
+
+        card.querySelector('.reco-preview-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            preview();
+        });
+
+        const addBtn = card.querySelector('.reco-add-now-btn');
+        addBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showStatusMenu(addBtn, async (status) => {
+                addBtn.disabled = true;
+                addBtn.textContent = 'Adding…';
+                const ok = await onAddWithStatus?.(item, status);
+                addBtn.textContent = ok ? '✓ Added' : '+ Add';
+                addBtn.disabled = Boolean(ok);
+                if (ok) card.classList.add('reco-added');
+            });
+        });
 
         card.tabIndex = 0;
-        card.addEventListener('click', activate);
+        card.addEventListener('click', preview);
         card.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') activate();
+            if (e.key === 'Enter') preview();
         });
         grid.appendChild(card);
     });
+}
+
+// Filter/sort controls for the recommendations screen.
+export function applyRecoFilters(items, { category = 'all', genre = 'all', rating = 'all', sortBy = 'default' } = {}) {
+    let out = [...items];
+
+    if (category !== 'all') out = out.filter(r => r.category === category);
+    if (genre !== 'all') {
+        out = out.filter(r => String(r.genre || '').toLowerCase().includes(genre.toLowerCase()));
+    }
+    if (rating !== 'all') {
+        const min = parseFloat(rating);
+        out = out.filter(r => (parseFloat(r.globalRating) || 0) >= min);
+    }
+
+    const score = r => parseFloat(r.globalRating) || 0;
+    switch (sortBy) {
+        case 'rating-desc': out.sort((a, b) => score(b) - score(a)); break;
+        case 'year-desc': out.sort((a, b) => (b.year || 0) - (a.year || 0)); break;
+        case 'year-asc': out.sort((a, b) => (a.year || 0) - (b.year || 0)); break;
+        case 'name-asc': out.sort((a, b) => String(a.title).localeCompare(String(b.title))); break;
+        default: break; // keep the AI's own ordering
+    }
+    return out;
+}
+
+export function recoGenres(items) {
+    const set = new Set();
+    items.forEach(r => String(r.genre || '').split(',').forEach(g => {
+        const clean = g.trim();
+        if (clean) set.add(clean);
+    }));
+    return [...set].sort();
 }
 
 // Updates one already-rendered card once its artwork/rating arrives, so the grid can

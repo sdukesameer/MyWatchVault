@@ -4,11 +4,12 @@
 import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
-import { fetchRecommendations, renderRecommendations, enhanceRecommendation, updateRecommendationCard } from './recommendations.js';
+import { fetchRecommendations, renderRecommendations, enhanceRecommendation, updateRecommendationCard, applyRecoFilters, recoGenres } from './recommendations.js';
 import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback } from './api.js';
 import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility, debounce } from './utils.js';
 import { setupSearch } from './search.js';
 import { getStats, getDashboardItems } from './dashboard.js';
+import * as cloud from './cloud.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, normalizeTags, isSeriesCategory } from './constants.js';
 
 const state = {
@@ -21,6 +22,10 @@ const state = {
     filterGenre: 'all',
     filterRating: 'all',
     libraryQuery: '',
+    groupBy: 'none',
+    selectMode: false,
+    selectedIds: new Set(),
+    recoFilters: { category: 'all', genre: 'all', rating: 'all', sortBy: 'default' },
     searchCache: new Map(),
     previewItem: null
 };
@@ -180,6 +185,20 @@ const openDetail = (mediaOrId) => {
     loadSimilarFor(media);
 };
 
+// Applies a chosen watch status to a not-yet-saved item, keeping the season data
+// consistent — "Completed" should mean every episode is marked watched.
+function applyStatusToItem(item, status) {
+    const seasons = (item.seasons || []).map(s => ({ ...s }));
+    if (status === 'completed') {
+        seasons.forEach(s => {
+            const total = parseInt(s.total) || 0;
+            if (total > 0) s.watched = total;
+            else s.completed = true; // unknown episode count
+        });
+    }
+    return { ...item, status, seasons };
+}
+
 // "More Like This" — populated after the modal opens so it never delays it.
 let similarToken = 0;
 async function loadSimilarFor(media) {
@@ -191,13 +210,13 @@ async function loadSimilarFor(media) {
 
     ui.renderSimilar(similar, {
         ownedTitles: new Set(state.library.map(m => lib.normalizeTitle(m.title))),
-        onAdd: async (item) => {
+        onAdd: async (item, status = 'plan-to-watch') => {
             const dupe = state.library.some(m => lib.normalizeTitle(m.title) === lib.normalizeTitle(item.title));
             if (dupe) return true;
             try {
                 const seasons = await fetchDeepDetails(item);
-                const added = lib.addMedia(state.library, { ...item, seasons });
-                showToast(`"${added.title}" added to vault ✓`, 'success');
+                const added = lib.addMedia(state.library, applyStatusToItem({ ...item, seasons }, status));
+                showToast(`"${added.title}" added as ${STATUS_LABELS[status]} ✓`, 'success');
                 render();
                 return true;
             } catch (e) {
@@ -231,11 +250,56 @@ function render() {
     const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy, state.libraryQuery);
     const isFiltered = Boolean(state.libraryQuery) || state.filterStatus !== 'all'
         || state.filterGenre !== 'all' || state.filterRating !== 'all';
-    ui.renderGrid(filtered, state.syncResults, state.currentCat, openDetail, isFiltered && state.library.length > 0);
+    ui.renderGrid(filtered, state.syncResults, state.currentCat, openDetail,
+        isFiltered && state.library.length > 0,
+        {
+            groupBy: state.groupBy,
+            selectMode: state.selectMode,
+            selectedIds: state.selectedIds,
+            onToggleSelect: toggleSelect
+        });
+    updateBulkBar();
     
     // Re-render recommendations if they are loaded so that "✓ In Vault" updates
     if (allRecosLoaded.length > 0 && recoCallback) {
-        renderRecommendations(allRecosLoaded, state.library, recoCallback, openDetail);
+        drawRecos();
+    }
+}
+
+// Redraws the recommendations grid honouring the filter/sort controls.
+function drawRecos() {
+    const visible = applyRecoFilters(allRecosLoaded, state.recoFilters);
+    renderRecommendations(visible, state.library, recoCallback, openDetail, addRecoWithStatus);
+
+    const bar = document.getElementById('reco-filter-bar');
+    if (bar) bar.style.display = allRecosLoaded.length ? 'flex' : 'none';
+
+    // Keep the genre list in step with whatever has been recommended so far.
+    const genreSel = document.getElementById('reco-genre');
+    if (genreSel) {
+        const current = genreSel.value;
+        const genres = recoGenres(allRecosLoaded);
+        genreSel.innerHTML = '<option value="all">All Genres</option>'
+            + genres.map(g => `<option value="${escapeHTML(g)}">${escapeHTML(g)}</option>`).join('');
+        genreSel.value = genres.includes(current) ? current : 'all';
+        state.recoFilters.genre = genreSel.value;
+    }
+}
+
+// Adds a recommendation straight to the vault with the chosen status.
+async function addRecoWithStatus(item, status) {
+    const dupe = state.library.some(m => lib.normalizeTitle(m.title) === lib.normalizeTitle(item.title));
+    if (dupe) { showToast(`"${item.title}" is already in your vault`, 'info'); return true; }
+    try {
+        const seasons = await fetchDeepDetails(item);
+        const added = lib.addMedia(state.library, applyStatusToItem({ ...item, seasons }, status));
+        showToast(`"${added.title}" added as ${STATUS_LABELS[status]} ✓`, 'success');
+        render();
+        syncUp();
+        return true;
+    } catch (e) {
+        showToast(`Couldn't add "${item.title}"`, 'error');
+        return false;
     }
 }
 
@@ -290,6 +354,175 @@ function setCachedSearch(query, results) {
     persistSearchCache();
 }
 
+
+// ── Cloud sync (Turso) ──────────────────────────────────────────
+// When a cloud DB is configured, editing is gated behind the admin passcode. With no
+// DB configured the app stays purely local and every control remains available.
+function canEdit() {
+    return !cloud.isCloudEnabled() || cloud.isEditor();
+}
+
+function guardEdit() {
+    if (canEdit()) return true;
+    showToast('Read-only — unlock editing in Settings ⚙️', 'info');
+    return false;
+}
+
+// Hides or disables the controls that mutate the vault while read-only.
+function applyEditPermissions() {
+    const editable = canEdit();
+    document.body.classList.toggle('read-only', !editable);
+
+    [
+        'manual-add-btn', 'select-mode-btn', 'detail-save-btn', 'detail-delete-btn',
+        'add-season-btn', 'detail-sync-btn', 'clear-all-btn', 'import-file-input'
+    ].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !editable;
+    });
+
+    const banner = document.getElementById('readonly-banner');
+    if (banner) banner.style.display = editable ? 'none' : 'flex';
+}
+
+function refreshCloudUI() {
+    const section = document.getElementById('cloud-section');
+    if (!section) return;
+
+    const st = cloud.cloudStatus();
+    section.style.display = st.configured ? 'block' : 'none';
+    if (!st.configured) { applyEditPermissions(); return; }
+
+    const editor = cloud.isEditor();
+    document.getElementById('cloud-status').textContent = editor
+        ? '🔓 Editing unlocked for this tab.'
+        : '🔒 Read-only. Enter the admin passcode to edit.';
+    document.getElementById('cloud-login-row').style.display = editor ? 'none' : 'flex';
+    document.getElementById('cloud-actions').style.display = editor ? 'flex' : 'none';
+    document.getElementById('cloud-readonly-actions').style.display = editor ? 'none' : 'block';
+
+    applyEditPermissions();
+}
+
+// Writes through to the cloud after a local change, when unlocked.
+async function syncUp() {
+    if (!cloud.isCloudEnabled() || !cloud.isEditor()) return;
+    try {
+        await cloud.push(state.library, lib.loadSyncMeta());
+    } catch (err) {
+        showToast(`Cloud save failed: ${err.message}`, 'error');
+    }
+}
+
+async function pullFromCloud({ silent = false } = {}) {
+    try {
+        const data = await cloud.pull();
+        if (!Array.isArray(data.library)) throw new Error('Malformed cloud data');
+
+        // Keep any artwork we already resolved locally — the cloud copy has none.
+        const localPosters = new Map(state.library.map(m => [m.id, { poster: m.poster, posterTried: m.posterTried }]));
+        state.library = data.library.map(m => ({ ...m, ...(localPosters.get(m.id) || {}) }));
+
+        lib.saveLibrary(state.library);
+        if (data.syncMeta) lib.saveSyncMeta(data.syncMeta);
+        render();
+        backfillPosters();
+        if (!silent) showToast(`Pulled ${state.library.length} titles from cloud ✓`, 'success');
+        return true;
+    } catch (err) {
+        if (!silent) showToast(`Pull failed: ${err.message}`, 'error');
+        return false;
+    }
+}
+
+// ── Bulk selection ──────────────────────────────────────────────
+function toggleSelect(id) {
+    if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+    else state.selectedIds.add(id);
+    render();
+}
+
+function setSelectMode(on) {
+    state.selectMode = on;
+    if (!on) state.selectedIds.clear();
+    const btn = document.getElementById('select-mode-btn');
+    if (btn) {
+        btn.textContent = on ? '✕ Cancel' : '☑ Select';
+        btn.classList.toggle('btn-primary', on);
+        btn.classList.toggle('btn-secondary', !on);
+    }
+    render();
+}
+
+function updateBulkBar() {
+    const bar = document.getElementById('bulk-bar');
+    if (!bar) return;
+    bar.style.display = state.selectMode ? 'flex' : 'none';
+
+    const count = state.selectedIds.size;
+    const label = document.getElementById('bulk-count');
+    if (label) label.textContent = `${count} selected`;
+
+    ['bulk-status-btn', 'bulk-delete-btn'].forEach(id => {
+        const b = document.getElementById(id);
+        if (b) b.disabled = count === 0;
+    });
+}
+
+// The ids currently visible under the active filters — "Select All" shouldn't reach
+// past what the user can actually see.
+function visibleIds() {
+    return lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus,
+        state.filterGenre, state.filterRating, state.sortBy, state.libraryQuery).map(m => m.id);
+}
+
+function bulkSetStatus(status) {
+    if (!guardEdit()) return;
+    const ids = [...state.selectedIds];
+    if (!ids.length) return;
+
+    ids.forEach(id => {
+        const media = state.library.find(m => m.id === id);
+        if (!media) return;
+        const updated = applyStatusToItem(media, status);
+        lib.updateMedia(state.library, id, {
+            status: updated.status,
+            seasons: updated.seasons,
+            updatedAt: new Date().toISOString()
+        });
+    });
+
+    showToast(`${ids.length} title${ids.length === 1 ? '' : 's'} set to ${STATUS_LABELS[status]}`, 'success');
+    state.selectedIds.clear();
+    render();
+    syncUp();
+}
+
+function bulkDelete() {
+    if (!guardEdit()) return;
+    const ids = [...state.selectedIds];
+    if (!ids.length) return;
+
+    const removed = ids.map(id => state.library.find(m => m.id === id)).filter(Boolean);
+    const snapshot = JSON.parse(JSON.stringify(removed));
+
+    ui.renderConfirmModal(
+        'Remove Selected',
+        `Remove ${ids.length} title${ids.length === 1 ? '' : 's'} from your vault?`,
+        'Remove',
+        () => {
+            ids.forEach(id => lib.removeMedia(state.library, state.syncResults, id));
+            state.selectedIds.clear();
+            render();
+            syncUp();
+            showToast(`Removed ${ids.length} title${ids.length === 1 ? '' : 's'}`, 'info', 'Undo', () => {
+                snapshot.forEach(m => lib.addMedia(state.library, m));
+                render();
+                showToast('Restored', 'success');
+            }, 8000);
+        }
+    );
+}
 
 // ── Poster backfill ─────────────────────────────────────────────
 // Older entries (and anything added while an upstream was down) can be missing artwork.
@@ -390,13 +623,15 @@ async function handleFetchRecos(append = false) {
         };
 
         // Show the grid straight away, then stream artwork into each card as it resolves.
-        renderRecommendations(allRecosLoaded, state.library, recoCallback, openDetail);
+        drawRecos();
         document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
 
         for (const item of recos) {
             await enhanceRecommendation(item, state.config);
             updateRecommendationCard(item);
         }
+        // Ratings/types arrive with the artwork, so refresh once filters can use them.
+        drawRecos();
     } catch (err) {
         hideLoading();
         showToast('Recommendations failed: ' + err.message, 'error');
@@ -417,7 +652,7 @@ function bindEvents() {
     });
     document.getElementById('refresh-reco-btn').addEventListener('click', () => handleFetchRecos(false));
     document.getElementById('load-more-reco-btn').addEventListener('click', () => handleFetchRecos(true));
-    document.getElementById('settings-btn').addEventListener('click', () => ui.openModal('settings-modal'));
+    document.getElementById('settings-btn').addEventListener('click', () => { ui.openModal('settings-modal'); refreshCloudUI(); });
     
     // Back buttons
     document.querySelectorAll('.back-to-lib').forEach(btn => {
@@ -455,6 +690,36 @@ function bindEvents() {
         state.libraryQuery = e.target.value;
         render();
     }, 200));
+    document.getElementById('group-by').addEventListener('change', (e) => {
+        state.groupBy = e.target.value;
+        render();
+    });
+
+    // Bulk selection
+    document.getElementById('select-mode-btn').addEventListener('click', () => setSelectMode(!state.selectMode));
+    document.getElementById('bulk-exit-btn').addEventListener('click', () => setSelectMode(false));
+    document.getElementById('bulk-clear').addEventListener('click', () => { state.selectedIds.clear(); render(); });
+    document.getElementById('bulk-select-all').addEventListener('click', () => {
+        const ids = visibleIds();
+        const allChosen = ids.length > 0 && ids.every(id => state.selectedIds.has(id));
+        if (allChosen) state.selectedIds.clear();
+        else ids.forEach(id => state.selectedIds.add(id));
+        render();
+    });
+    document.getElementById('bulk-status-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        ui.showStatusMenu(e.currentTarget, bulkSetStatus, { heading: 'Set status to…' });
+    });
+    document.getElementById('bulk-delete-btn').addEventListener('click', bulkDelete);
+
+    // Recommendation filters
+    [['reco-sort', 'sortBy'], ['reco-type', 'category'], ['reco-genre', 'genre'], ['reco-rating', 'rating']]
+        .forEach(([id, key]) => {
+            document.getElementById(id).addEventListener('change', (e) => {
+                state.recoFilters[key] = e.target.value;
+                drawRecos();
+            });
+        });
 
     // Random Picker
     document.getElementById('random-picker-btn').addEventListener('click', () => {
@@ -492,7 +757,7 @@ function bindEvents() {
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { dropdown.style.display = 'none'; document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); } });
 
     // Manual Add Modal
-    document.getElementById('manual-add-btn').addEventListener('click', () => ui.openModal('add-modal'));
+    document.getElementById('manual-add-btn').addEventListener('click', () => { if (guardEdit()) ui.openModal('add-modal'); });
     setupModalAccessibility('add-modal', 'add-modal-close', () => ui.closeModal('add-modal'));
     document.getElementById('add-cancel-btn').addEventListener('click', () => ui.closeModal('add-modal'));
     document.getElementById('add-modal').addEventListener('click', e => { if (e.target === e.currentTarget) ui.closeModal('add-modal'); });
@@ -654,6 +919,7 @@ function bindEvents() {
     document.getElementById('detail-save-btn').addEventListener('click', () => {
         const data = ui.collectDetailData();
         if (data.id.startsWith('preview_')) {
+            if (!guardEdit()) return;
             const fullItem = { ...state.previewItem, ...data };
             delete fullItem.id; // Let lib.addMedia generate a real ID
             lib.addMedia(state.library, fullItem);
@@ -661,11 +927,14 @@ function bindEvents() {
             ui.closeModal('detail-modal');
             render();
             showToast('Added to vault ✓', 'success');
+            syncUp();
         } else {
+            if (!guardEdit()) return;
             if (lib.updateMedia(state.library, data.id, { ...data, updatedAt: new Date().toISOString() })) {
                 ui.closeModal('detail-modal');
                 render();
                 showToast('Saved ✓', 'success');
+                syncUp();
             }
         }
     });
@@ -762,6 +1031,51 @@ function bindEvents() {
     document.getElementById('settings-cancel').addEventListener('click', () => ui.closeModal('settings-modal'));
     document.getElementById('settings-modal').addEventListener('click', e => { if (e.target === e.currentTarget) ui.closeModal('settings-modal'); });
 
+    // Cloud sync controls
+    document.getElementById('readonly-unlock-btn').addEventListener('click', () => {
+        ui.openModal('settings-modal');
+        refreshCloudUI();
+        document.getElementById('cloud-passcode')?.focus();
+    });
+    document.getElementById('cloud-login-btn').addEventListener('click', async () => {
+        const input = document.getElementById('cloud-passcode');
+        const code = input.value.trim();
+        if (!code) { showToast('Enter the admin passcode', 'error'); return; }
+        try {
+            await cloud.login(code);
+            input.value = '';
+            refreshCloudUI();
+            showToast('Editing unlocked ✓', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    });
+    document.getElementById('cloud-passcode').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('cloud-login-btn').click();
+    });
+    document.getElementById('cloud-logout-btn').addEventListener('click', () => {
+        cloud.logout();
+        refreshCloudUI();
+        showToast('Locked — now read-only', 'info');
+    });
+    document.getElementById('cloud-push-btn').addEventListener('click', async () => {
+        showLoading('Saving to cloud…');
+        try {
+            const res = await cloud.push(state.library, lib.loadSyncMeta());
+            showToast(`Pushed ${res.count} titles to cloud ✓`, 'success');
+        } catch (err) {
+            showToast(`Push failed: ${err.message}`, 'error');
+        }
+        hideLoading();
+    });
+    const doPull = async () => {
+        showLoading('Loading from cloud…');
+        await pullFromCloud();
+        hideLoading();
+    };
+    document.getElementById('cloud-pull-btn').addEventListener('click', doPull);
+    document.getElementById('cloud-pull-ro-btn').addEventListener('click', doPull);
+
     document.getElementById('export-btn').addEventListener('click', () => {
         lib.exportLibrary(state.library, state.syncResults);
         showToast('Export triggered', 'success');
@@ -854,6 +1168,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     bindEvents();
     render();
+
+    // Cloud sync: if a database is configured, its copy is the source of truth.
+    await cloud.checkCloud();
+    refreshCloudUI();
+    if (cloud.isCloudEnabled()) {
+        await pullFromCloud({ silent: true });
+    }
 
     // Fill in any missing artwork quietly in the background.
     setTimeout(() => backfillPosters(), 1200);

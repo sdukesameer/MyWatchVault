@@ -42,10 +42,34 @@ WatchVault is built to deploy seamlessly on Netlify with serverless functions fo
    - `GROQ_API_KEY` (Recommended fallback)
    - `OPENROUTER_API_KEY` (Optional fallback)
    - `COHERE_API_KEY` (Optional fallback)
+   - `TMDB_API_KEY` (Optional, for season breakdowns and movie data)
    - `UNSPLASH_ACCESS_KEY` (Optional, for higher-quality posters)
+   - `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ADMIN_PASSCODE` (Optional, see Cloud Sync below)
 3. Build Settings:
    - Build command: `npm run build-env` or `node build-env.js`
    - Publish directory: `.` (root directory)
+
+## Cloud Sync (Turso) — optional
+
+By default WatchVault stores everything in your browser's `localStorage`. Point it at a
+[Turso](https://turso.tech) database and the vault becomes shareable: anyone can **read** it,
+but only someone with the admin passcode can **edit**.
+
+1. Create a database and token:
+   ```bash
+   turso db create watchvault
+   turso db show watchvault --url      # → TURSO_DATABASE_URL
+   turso db tokens create watchvault   # → TURSO_AUTH_TOKEN
+   ```
+2. Add `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` and `ADMIN_PASSCODE` to your Netlify
+   environment variables. The table is created automatically on first use.
+3. Open **Settings ⚙️ → Cloud Sync** and enter the passcode to unlock editing. The passcode
+   lives in `sessionStorage`, so closing the tab locks it again.
+
+Only text is stored — titles, statuses, seasons, ratings, tags and notes. Poster images are
+never written to the database; they're re-fetched locally from the free artwork sources, so
+rows stay small. If these variables aren't set, the cloud UI stays hidden and the app works
+exactly as before, fully local and fully editable.
 
 ## Architecture & Security
 

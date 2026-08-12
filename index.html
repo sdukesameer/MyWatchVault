@@ -51,6 +51,11 @@
 <div id="screen-library" class="screen active">
     <div class="container">
 
+        <div class="readonly-banner" id="readonly-banner" style="display:none;">
+            <span>🔒 Read-only mode — unlock editing with the admin passcode.</span>
+            <button class="btn btn-secondary btn-sm" id="readonly-unlock-btn">Unlock</button>
+        </div>
+
         <!-- Dashboard Overview -->
         <div class="dashboard-grid">
             <!-- Continue Watching -->
@@ -127,8 +132,27 @@
                 <option value="4+">★★★★+ (4+ Stars)</option>
                 <option value="3+">★★★+ (3+ Stars)</option>
             </select>
+            <select id="group-by" class="input-field" style="width: auto;">
+                <option value="none">No Grouping</option>
+                <option value="status">Group: Status</option>
+                <option value="category">Group: Type</option>
+                <option value="genre">Group: Genre</option>
+                <option value="rating">Group: Your Rating</option>
+            </select>
             <input type="search" id="library-filter" class="input-field" style="width: auto; flex: 1; min-width: 160px;"
                    placeholder="Filter your vault by title or tag…" autocomplete="off">
+            <button class="btn btn-secondary btn-sm" id="select-mode-btn">☑ Select</button>
+        </div>
+
+        <!-- Bulk action bar -->
+        <div class="bulk-bar" id="bulk-bar" style="display:none;">
+            <button class="btn btn-secondary btn-sm" id="bulk-select-all">Select All</button>
+            <button class="btn btn-ghost btn-sm" id="bulk-clear">Clear</button>
+            <span class="bulk-count" id="bulk-count">0 selected</span>
+            <span class="bulk-spacer"></span>
+            <button class="btn btn-primary btn-sm" id="bulk-status-btn">Change Status</button>
+            <button class="btn btn-ghost btn-sm" id="bulk-delete-btn" style="color:var(--danger);">🗑 Remove</button>
+            <button class="btn btn-ghost btn-sm" id="bulk-exit-btn">Done</button>
         </div>
 
         <!-- Add Bar -->
@@ -170,6 +194,31 @@
                 <div style="font-size:14px;color:var(--text-dim);margin-top:4px;">AI picks based on what you love</div>
             </div>
             <button class="btn btn-primary" id="refresh-reco-btn">🔄 Refresh</button>
+        </div>
+        <div class="filter-bar" id="reco-filter-bar" style="display:none;">
+            <select id="reco-sort" class="input-field" style="width:auto;">
+                <option value="default">↕ AI Order</option>
+                <option value="rating-desc">★ Highest Rated</option>
+                <option value="year-desc">↓ Newest</option>
+                <option value="year-asc">↑ Oldest</option>
+                <option value="name-asc">A → Z</option>
+            </select>
+            <select id="reco-type" class="input-field" style="width:auto;">
+                <option value="all">All Types</option>
+                <option value="anime-series">Anime Series</option>
+                <option value="anime-movie">Anime Movie</option>
+                <option value="series">Web Series</option>
+                <option value="movie">Movie</option>
+            </select>
+            <select id="reco-genre" class="input-field" style="width:auto;">
+                <option value="all">All Genres</option>
+            </select>
+            <select id="reco-rating" class="input-field" style="width:auto;">
+                <option value="all">Any Rating</option>
+                <option value="8">🌐 8.0+</option>
+                <option value="7">🌐 7.0+</option>
+                <option value="6">🌐 6.0+</option>
+            </select>
         </div>
         <div id="reco-grid" class="reco-grid"></div>
         <div style="text-align:center;margin-top:32px;display:none;" id="load-more-reco-wrap">
@@ -316,8 +365,26 @@
             <button class="modal-close" id="settings-close">✕</button>
         </div>
         <div class="modal-body" style="display:flex;flex-direction:column;gap:18px;">
+            <!-- Cloud sync (Turso) — hidden unless the serverless function reports it's configured -->
+            <div id="cloud-section" style="display:none;">
+                <div class="field-label">Cloud Sync</div>
+                <div class="cloud-status" id="cloud-status">Checking…</div>
+                <div id="cloud-login-row" style="display:flex;gap:8px;margin-top:10px;">
+                    <input type="password" id="cloud-passcode" class="input-field" placeholder="Admin passcode"
+                           autocomplete="current-password" style="flex:1;">
+                    <button class="btn btn-primary btn-sm" id="cloud-login-btn">Unlock</button>
+                </div>
+                <div id="cloud-actions" style="display:none;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                    <button class="btn btn-secondary btn-sm" id="cloud-pull-btn">⬇ Pull from Cloud</button>
+                    <button class="btn btn-secondary btn-sm" id="cloud-push-btn" style="color:var(--accent2);">⬆ Push to Cloud</button>
+                    <button class="btn btn-ghost btn-sm" id="cloud-logout-btn">Lock</button>
+                </div>
+                <div id="cloud-readonly-actions" style="display:none;margin-top:10px;">
+                    <button class="btn btn-secondary btn-sm" id="cloud-pull-ro-btn">⬇ Pull latest from Cloud</button>
+                </div>
+            </div>
             <p style="font-size: 14px; color: var(--text-dim); line-height: 1.6;">
-                API keys are now securely managed server-side. For local development, update your <code>js/env.js</code> file.
+                API keys are securely managed server-side. For local development, update your <code>js/env.js</code> file.
             </p>
             <div style="border-top:1px solid var(--border);padding-top:20px; display:flex; flex-direction:column; gap:10px;">
                 <button class="btn btn-secondary" id="export-btn" style="color:var(--accent2); justify-content:center;">📤 Export Backup (JSON)</button>
