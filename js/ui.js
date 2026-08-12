@@ -242,14 +242,10 @@ export function openDetailModal(media) {
             el.classList.add('active');
             updateRewatchUI(el.dataset.status);
             
+            // Marking the whole item complete finishes every season, even ones whose
+            // episode count is unknown.
             if (el.dataset.status === 'completed') {
-                document.querySelectorAll('#seasons-grid .season-row').forEach(row => {
-                    const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
-                    if (totalInp.value && parseInt(totalInp.value) > 0) {
-                        watchedInp.value = totalInp.value;
-                    }
-                    updateSeasonStatus(row);
-                });
+                markAllSeasonsComplete();
             }
         });
     });
@@ -299,6 +295,20 @@ function renderRatingStars(rating) {
     });
 }
 
+// A season counts as finished when the episode counts say so. When the total is unknown
+// (ongoing shows report no count) we fall back to an explicit flag the user can set.
+function isSeasonComplete({ watched, total, completed }) {
+    const w = parseInt(watched) || 0;
+    const t = parseInt(total) || 0;
+    return t > 0 ? w >= t : Boolean(completed);
+}
+
+function seasonStateOf(season) {
+    if (isSeasonComplete(season)) return { cls: 'done', label: 'Complete' };
+    if ((parseInt(season.watched) || 0) > 0) return { cls: 'progress', label: 'In progress' };
+    return { cls: 'not-started', label: 'Not started' };
+}
+
 export function renderSeasons(seasons) {
     const grid = document.getElementById('seasons-grid');
     grid.innerHTML = '';
@@ -308,13 +318,13 @@ export function renderSeasons(seasons) {
         const number = parseInt(s.number) || idx + 1;
         const watched = parseInt(s.watched) || 0;
         const total = parseInt(s.total) || 0;
-        let statusClass = 'not-started', statusLabel = 'Not started';
-        if (watched > 0 && total > 0 && watched >= total) { statusClass = 'done'; statusLabel = 'Complete'; }
-        else if (watched > 0) { statusClass = 'progress'; statusLabel = 'In progress'; }
+        const completed = isSeasonComplete(s);
+        const { cls, label } = seasonStateOf(s);
 
         const row = document.createElement('div');
         row.className = 'season-row';
         row.dataset.number = number;
+        row.dataset.completed = completed ? 'true' : 'false';
         row.innerHTML = `
             <div class="season-label">Season ${number}</div>
             <div class="season-ep-track">
@@ -323,30 +333,26 @@ export function renderSeasons(seasons) {
                 <input class="ep-input" type="number" min="0" value="${total || ''}" placeholder="?" title="Total episodes">
                 <span style="font-size:11px;color:var(--text-muted);">ep</span>
             </div>
-            <span class="season-status ${statusClass}">${statusLabel}</span>
+            <span class="season-status ${cls}" role="button" tabindex="0">${label}</span>
             <button class="season-delete" title="Remove season">✕</button>`;
 
         row.querySelectorAll('.ep-input').forEach(inp => {
-            inp.addEventListener('input', () => updateSeasonStatus(row));
+            inp.addEventListener('input', () => {
+                // Typed counts take over from the manual flag.
+                row.dataset.completed = 'false';
+                updateSeasonStatus(row);
+            });
         });
-        
+
         const statusSpan = row.querySelector('.season-status');
         statusSpan.style.cursor = 'pointer';
-        statusSpan.title = 'Click to toggle completion';
-        statusSpan.addEventListener('click', () => {
-            const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
-            const w = parseInt(watchedInp.value) || 0;
-            const t = parseInt(totalInp.value) || 0;
-            if (w === t && t > 0) {
-                watchedInp.value = 0; // reset
-            } else if (t > 0) {
-                watchedInp.value = t; // complete
-            } else {
-                watchedInp.value = w + 1; // increment if total unknown
-            }
-            updateSeasonStatus(row);
+        statusSpan.title = 'Click to cycle: Complete → In progress → Not started';
+        const cycle = () => cycleSeasonState(row);
+        statusSpan.addEventListener('click', cycle);
+        statusSpan.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycle(); }
         });
-        
+
         row.querySelector('.season-delete').addEventListener('click', () => {
             // Re-render from the remaining rows so the labels can never drift from the data.
             renderSeasons(collectSeasonRows().filter(s => s.number !== number));
@@ -361,59 +367,126 @@ export function renderSeasons(seasons) {
 export function collectSeasonRows() {
     return Array.from(document.querySelectorAll('#seasons-grid .season-row')).map((row, idx) => {
         const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
-        return {
+        const season = {
             number: parseInt(row.dataset.number) || idx + 1,
             watched: parseInt(watchedInp.value) || 0,
             total: parseInt(totalInp.value) || 0
         };
+        // Only persist the flag when it's actually load-bearing (unknown total).
+        if (season.total === 0 && row.dataset.completed === 'true') season.completed = true;
+        return season;
     });
 }
 
-function updateSeasonStatus(row) {
+function rowIsComplete(row) {
     const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
-    const watched = parseInt(watchedInp.value) || 0;
+    return isSeasonComplete({
+        watched: watchedInp.value,
+        total: totalInp.value,
+        completed: row.dataset.completed === 'true'
+    });
+}
+
+function markRowComplete(row) {
+    const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
     const total = parseInt(totalInp.value) || 0;
-    const statusEl = row.querySelector('.season-status');
-    if (watched > 0 && total > 0 && watched >= total) {
-        statusEl.className = 'season-status done'; statusEl.textContent = 'Complete';
-    } else if (watched > 0) {
-        statusEl.className = 'season-status progress'; statusEl.textContent = 'In progress';
+    if (total > 0) {
+        watchedInp.value = total;
+        row.dataset.completed = 'false';
     } else {
-        statusEl.className = 'season-status not-started'; statusEl.textContent = 'Not started';
+        // No episode count available — record completion explicitly.
+        row.dataset.completed = 'true';
     }
-    
+    updateSeasonStatus(row, { silent: true });
+}
+
+function markRowInProgress(row) {
+    const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
+    const total = parseInt(totalInp.value) || 0;
+    row.dataset.completed = 'false';
+    if (total > 1) watchedInp.value = total - 1;
+    else if (total === 1) watchedInp.value = 0;
+    else watchedInp.value = Math.max(1, parseInt(watchedInp.value) || 0);
+    updateSeasonStatus(row, { silent: true });
+}
+
+function markRowNotStarted(row) {
+    const [watchedInp] = row.querySelectorAll('.ep-input');
+    watchedInp.value = 0;
+    row.dataset.completed = 'false';
+    updateSeasonStatus(row, { silent: true });
+}
+
+// Complete → In progress → Not started. Completing a season also completes every earlier
+// one, since you can't reach season N without finishing the ones before it.
+function cycleSeasonState(row) {
+    const number = parseInt(row.dataset.number) || 0;
+    const watched = parseInt(row.querySelectorAll('.ep-input')[0].value) || 0;
+
+    if (rowIsComplete(row)) {
+        markRowInProgress(row);
+    } else if (watched > 0) {
+        markRowNotStarted(row);
+    } else {
+        document.querySelectorAll('#seasons-grid .season-row').forEach(r => {
+            if ((parseInt(r.dataset.number) || 0) <= number) markRowComplete(r);
+        });
+    }
+
     updateOverallStatusFromSeasons();
 }
 
-function updateOverallStatusFromSeasons() {
-    const rows = document.querySelectorAll('#seasons-grid .season-row');
-    if (rows.length === 0) return;
-    
-    let anyWatching = false;
-    let allCompleted = true;
-    
-    rows.forEach(row => {
-        const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
-        const w = parseInt(watchedInp.value) || 0;
-        const t = parseInt(totalInp.value) || 0;
-        
-        if (w > 0) anyWatching = true;
-        if (w === 0 || t === 0 || w < t) allCompleted = false;
+// Sets every season to complete — used when the item itself is marked completed.
+export function markAllSeasonsComplete() {
+    document.querySelectorAll('#seasons-grid .season-row').forEach(markRowComplete);
+}
+
+function updateSeasonStatus(row, { silent = false } = {}) {
+    const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
+    const statusEl = row.querySelector('.season-status');
+    const { cls, label } = seasonStateOf({
+        watched: watchedInp.value,
+        total: totalInp.value,
+        completed: row.dataset.completed === 'true'
     });
-    
+    statusEl.className = `season-status ${cls}`;
+    statusEl.textContent = label;
+
+    // Callers doing a bulk update recompute the item status once at the end.
+    if (!silent) updateOverallStatusFromSeasons();
+}
+
+function updateOverallStatusFromSeasons() {
+    const rows = Array.from(document.querySelectorAll('#seasons-grid .season-row'));
+    if (rows.length === 0) return;
+
+    let anyProgress = false;
+    let allCompleted = true;
+
+    rows.forEach(row => {
+        const watched = parseInt(row.querySelectorAll('.ep-input')[0].value) || 0;
+        const complete = rowIsComplete(row);
+        if (!complete) allCompleted = false;
+        if (complete || watched > 0) anyProgress = true;
+    });
+
     const ssEl = document.getElementById('status-selector');
     if (!ssEl) return;
     const opts = ssEl.querySelectorAll('.status-opt');
+    const current = ssEl.querySelector('.status-opt.active')?.dataset.status;
     let targetStatus = null;
-    
-    if (allCompleted && rows.length > 0) {
+
+    if (allCompleted) {
+        // Every season finished always means the item is finished.
         targetStatus = 'completed';
-    } else if (anyWatching) {
-        targetStatus = 'watching';
-    } else {
+    } else if (anyProgress) {
+        // Partway through — but don't stomp a deliberate On Hold / Dropped.
+        targetStatus = (current === 'on-hold' || current === 'dropped') ? current : 'watching';
+    } else if (current === 'completed' || current === 'watching') {
+        // Progress was cleared, so "completed"/"watching" no longer holds.
         targetStatus = 'plan-to-watch';
     }
-    
+
     if (targetStatus) {
         opts.forEach(o => o.classList.remove('active'));
         const targetOpt = Array.from(opts).find(o => o.dataset.status === targetStatus);

@@ -1,6 +1,6 @@
 // js/search.js
 import { escapeHTML, debounce } from './utils.js';
-import { callTMDB } from './api.js';
+import { callTMDB, jikanFetch, fetchJSONRetry } from './api.js';
 
 let activeSearchController = null;
 
@@ -29,15 +29,15 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
             try {
                 results = [];
                 const [jikanRes, tvmazeRes, tmdbMovie, tmdbTv] = await Promise.allSettled([
-                    fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=3`, { signal }).then(r=>r.json()),
-                    fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`, { signal }).then(r=>r.json()),
+                    jikanFetch(`/anime?q=${encodeURIComponent(query)}&limit=3`, { signal, retries: 1 }),
+                    fetchJSONRetry(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`, { signal, retries: 1 }),
                     callTMDB('search-movie', { query }, state.config, signal),
                     callTMDB('search-tv', { query }, state.config, signal)
                 ]);
 
                 if (signal.aborted) return;
 
-                if (jikanRes.status === 'fulfilled' && jikanRes.value.data) {
+                if (jikanRes.status === 'fulfilled' && jikanRes.value?.data) {
                     jikanRes.value.data.slice(0, 3).forEach(a => {
                         results.push({
                             title: a.title_english || a.title,
@@ -96,6 +96,17 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
                             globalRating: s.vote_average ? `${s.vote_average.toFixed(1)} ★` : null
                         });
                     });
+                }
+
+                // Every source returning nothing usually means the upstreams are down
+                // (Jikan 504s often), which is different from a genuine no-match.
+                if (results.length === 0) {
+                    const sources = [jikanRes, tvmazeRes, tmdbMovie, tmdbTv];
+                    const allUnavailable = sources.every(r => r.status === 'rejected' || r.value == null);
+                    if (allUnavailable) {
+                        dropdown.innerHTML = `<div style="padding:16px;color:var(--danger);text-align:center;">Search services are unreachable right now.<br><span style="color:var(--text-muted);font-size:12px;">Try again in a moment, or use “＋ Add Manually”.</span></div>`;
+                        return;
+                    }
                 }
 
                 if (results.length > 0) setCachedSearch(query, results);

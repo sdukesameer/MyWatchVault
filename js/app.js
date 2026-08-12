@@ -5,7 +5,7 @@ import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations } from './recommendations.js';
-import { callAI, extractJSON, getLastProvider, callTMDB } from './api.js';
+import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount } from './api.js';
 import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility } from './utils.js';
 import { setupSearch } from './search.js';
 import { getStats, getDashboardItems } from './dashboard.js';
@@ -32,70 +32,109 @@ function cacheSet(key, val) {
     detailCache.set(key, val);
 }
 
+// TMDB exposes a real per-season breakdown, which is what we want when MAL/TVmaze are
+// unavailable or (for long-running anime) only report a single lump season.
+function seasonsFromTMDBDetails(details) {
+    const listed = Array.isArray(details?.seasons) ? details.seasons : [];
+    const real = listed.filter(s => (parseInt(s.season_number) || 0) > 0);
+    if (real.length) {
+        return real.map(s => ({
+            number: parseInt(s.season_number),
+            watched: 0,
+            total: parseInt(s.episode_count) || 0
+        }));
+    }
+    const count = parseInt(details?.number_of_seasons) || 0;
+    return Array.from({ length: count }, (_, i) => ({ number: i + 1, watched: 0, total: 0 }));
+}
+
+// Resolves seasons through TMDB. Used as a fallback for both anime and live-action series.
+async function tmdbSeasonsFor(item) {
+    try {
+        let tvId = item.tmdbId;
+        if (!tvId) {
+            const search = await callTMDB('search-tv', { query: item.title }, state.config);
+            const best = search?.results?.[0];
+            if (!best) return [];
+            tvId = best.id;
+            if (!item.poster && best.poster_path) item.poster = `https://image.tmdb.org/t/p/w500${best.poster_path}`;
+        }
+        const details = await callTMDB('tv-details', { tvId }, state.config);
+        const seasons = seasonsFromTMDBDetails(details);
+        if (seasons.length) item.tmdbId = tvId;
+        return seasons;
+    } catch (e) {
+        console.warn('TMDB season fallback failed:', e.message);
+        return [];
+    }
+}
+
 async function fetchDeepDetails(item) {
     const cacheKey = item.category + '_' + (item.jikanId || item.tvmazeId || item.tmdbId || item.title);
     if (detailCache.has(cacheKey)) return detailCache.get(cacheKey);
     
     let seasons = [];
-    let attempts = 0;
-    while (attempts < 3) {
-        try {
-            if (item.category === 'anime-series' || item.category === 'anime') {
-                let jId = item.jikanId;
-                if (!jId) {
-                    const searchRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`);
-                    if (searchRes.ok) {
-                        const sData = await searchRes.json();
-                        if (sData.data?.[0]) jId = sData.data[0].mal_id;
-                    }
-                }
-                
-                if (jId) {
-                    const res = await fetch(`https://api.jikan.moe/v4/anime/${jId}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        const eps = data.data.episodes || 0;
-                        seasons = [{ number: 1, watched: 0, total: eps }];
-                        item.jikanId = jId; // save it
-                        break;
-                    }
-                }
-            } else if (item.category === 'series') {
-                let tvId = item.tvmazeId;
-                if (!tvId) {
-                    const searchRes = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`);
-                    if (searchRes.ok) {
-                        const sData = await searchRes.json();
-                        if (sData?.[0]?.show) tvId = sData[0].show.id;
-                    }
-                }
-                if (tvId) {
-                    const res = await fetch(`https://api.tvmaze.com/shows/${tvId}/seasons`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        seasons = data.filter(s => s.number > 0).map(s => ({
-                            number: s.number,
-                            watched: 0,
-                            total: s.episodeOrder || 0
-                        }));
-                        item.tvmazeId = tvId; // save it
-                        break;
-                    }
-                }
-            } else {
-                break; // Not a supported category for deep fetch
+    let failed = false;
+
+    try {
+        if (item.category === 'anime-series' || item.category === 'anime') {
+            let jId = item.jikanId;
+            if (!jId) {
+                const sData = await jikanFetch(`/anime?q=${encodeURIComponent(item.title)}&limit=1`);
+                if (sData?.data?.[0]) jId = sData.data[0].mal_id;
             }
-        } catch (e) {
-            console.warn(`Deep fetch error (attempt ${attempts + 1}):`, e);
+
+            if (jId) {
+                const data = await jikanFetch(`/anime/${jId}`);
+                if (data?.data) {
+                    let eps = parseInt(data.data.episodes) || 0;
+                    // Airing shows report no episode count; count the aired ones instead.
+                    if (!eps) eps = await resolveAnimeEpisodeCount(jId);
+                    seasons = [{ number: 1, watched: 0, total: eps }];
+                    item.jikanId = jId; // save it
+                }
+            }
+
+            // MAL search is frequently down, and it models long runners as one lump
+            // season. Fall back to TMDB, which knows the real season breakdown.
+            if (!seasons.length || (seasons.length === 1 && !seasons[0].total)) {
+                const tmdbSeasons = await tmdbSeasonsFor(item);
+                if (tmdbSeasons.length) seasons = tmdbSeasons;
+            }
+            if (!seasons.length) failed = true;
+        } else if (item.category === 'series') {
+            let tvId = item.tvmazeId;
+            if (!tvId) {
+                const sData = await fetchJSONRetry(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`);
+                if (sData?.[0]?.show) tvId = sData[0].show.id;
+            }
+            if (tvId) {
+                const data = await fetchJSONRetry(`https://api.tvmaze.com/shows/${tvId}/seasons`);
+                if (Array.isArray(data)) {
+                    seasons = data.filter(s => s.number > 0).map(s => ({
+                        number: s.number,
+                        watched: 0,
+                        total: s.episodeOrder || 0
+                    }));
+                    item.tvmazeId = tvId; // save it
+                }
+            }
+
+            if (!seasons.length) {
+                const tmdbSeasons = await tmdbSeasonsFor(item);
+                if (tmdbSeasons.length) seasons = tmdbSeasons;
+            }
+            if (!seasons.length) failed = true;
         }
-        attempts++;
-        if (attempts < 3) await new Promise(r => setTimeout(r, 600)); // wait before retry
+    } catch (e) {
+        console.warn('Deep fetch error:', e);
+        failed = true;
     }
-    
-    if (attempts === 3) {
-        showToast(`Failed to fetch latest season data for ${item.title}`, 'error');
+
+    if (failed) {
+        showToast(`Couldn't reach the episode database for "${item.title}" — you can still set episodes manually.`, 'error');
     }
-    
+
     if ((item.category === 'series' || item.category === 'anime-series') && seasons.length === 0) {
         seasons = [{ number: 1, watched: 0, total: 0 }];
     }
@@ -396,19 +435,29 @@ function bindEvents() {
 
         try {
             if (category.startsWith('anime')) {
-                const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=1`);
-                if (jikanRes.ok) {
-                    const sData = await jikanRes.json();
-                    if (sData.data && sData.data[0]) {
-                        const best = sData.data[0];
-                        if (!mediaData.year && best.year) mediaData.year = best.year;
-                        if (!mediaData.genre && best.genres && best.genres.length > 0) {
-                            mediaData.genre = best.genres.map(g => g.name).join(', ');
-                        }
-                        mediaData.description = (best.synopsis || '').slice(0, 300) + (best.synopsis?.length > 300 ? '...' : '');
-                        mediaData.poster = best.images?.jpg?.large_image_url || best.images?.jpg?.image_url;
-                        mediaData.globalRating = best.score ? `${best.score} ★` : null;
-                        mediaData.jikanId = best.mal_id;
+                const sData = await jikanFetch(`/anime?q=${encodeURIComponent(title)}&limit=1`);
+                if (sData?.data?.[0]) {
+                    const best = sData.data[0];
+                    if (!mediaData.year && best.year) mediaData.year = best.year;
+                    if (!mediaData.genre && best.genres && best.genres.length > 0) {
+                        mediaData.genre = best.genres.map(g => g.name).join(', ');
+                    }
+                    mediaData.description = (best.synopsis || '').slice(0, 300) + (best.synopsis?.length > 300 ? '...' : '');
+                    mediaData.poster = best.images?.jpg?.large_image_url || best.images?.jpg?.image_url;
+                    mediaData.globalRating = best.score ? `${best.score} ★` : null;
+                    mediaData.jikanId = best.mal_id;
+                } else {
+                    // MAL unreachable — pull what we can from TMDB instead of adding a bare title.
+                    const endpoint = category === 'anime-movie' ? 'search-movie' : 'search-tv';
+                    const alt = await callTMDB(endpoint, { query: title }, state.config).catch(() => null);
+                    const best = alt?.results?.[0];
+                    if (best) {
+                        const date = best.release_date || best.first_air_date;
+                        if (!mediaData.year && date) mediaData.year = parseInt(date.split('-')[0]);
+                        if (best.poster_path) mediaData.poster = `https://image.tmdb.org/t/p/w500${best.poster_path}`;
+                        if (best.vote_average) mediaData.globalRating = `${best.vote_average.toFixed(1)} ★`;
+                        mediaData.description = (best.overview || '').slice(0, 300) + (best.overview?.length > 300 ? '...' : '');
+                        mediaData.tmdbId = best.id;
                     }
                 }
             } else {
@@ -467,16 +516,14 @@ function bindEvents() {
         }
         if (!media) return false;
         
-        let currentSeasonsNorm = (currentData.seasons || []).map(s => ({
+        const normSeason = s => ({
             number: parseInt(s.number) || 0,
             watched: parseInt(s.watched) || 0,
-            total: parseInt(s.total) || 0
-        }));
-        let mediaSeasonsNorm = (media.seasons || []).map(s => ({
-            number: parseInt(s.number) || 0,
-            watched: parseInt(s.watched) || 0,
-            total: parseInt(s.total) || 0
-        }));
+            total: parseInt(s.total) || 0,
+            completed: Boolean(s.completed)
+        });
+        let currentSeasonsNorm = (currentData.seasons || []).map(normSeason);
+        let mediaSeasonsNorm = (media.seasons || []).map(normSeason);
         
         if (mediaSeasonsNorm.length === 0 && currentSeasonsNorm.length === 1 && currentSeasonsNorm[0].watched === 0 && currentSeasonsNorm[0].total === 0) {
             currentSeasonsNorm = [];
@@ -551,10 +598,12 @@ function bindEvents() {
             // Merge seasons, preferring watched counts the user has typed but not yet saved.
             if (newSeasons && newSeasons.length > 0) {
                 newSeasons.forEach(ns => {
-                    const edited = (data.seasons || []).find(s => s.number === ns.number);
-                    const existing = (media.seasons || []).find(s => s.number === ns.number);
-                    if (edited) ns.watched = edited.watched;
-                    else if (existing) ns.watched = existing.watched;
+                    const prior = (data.seasons || []).find(s => s.number === ns.number)
+                        || (media.seasons || []).find(s => s.number === ns.number);
+                    if (prior) {
+                        ns.watched = prior.watched;
+                        if (prior.completed) ns.completed = true;
+                    }
                 });
                 media.seasons = newSeasons;
 

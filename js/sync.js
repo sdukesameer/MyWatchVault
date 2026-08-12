@@ -1,7 +1,7 @@
 // js/sync.js
 // AI Sync Engine
 
-import { callTMDB, getLastProvider, callAI, extractJSON } from './api.js';
+import { callTMDB, getLastProvider, callAI, extractJSON, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount } from './api.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './constants.js';
 import { escapeHTML, showToast } from './utils.js';
 import { loadSyncMeta, normalizeTitle } from './library.js';
@@ -34,11 +34,16 @@ export async function runSync(library, config, onProgress) {
             if (media.category === 'movie' || media.category === 'anime-movie') {
                 result = { latestStatus: 'Released', isOngoing: false, upToDate: true };
             } else if (media.jikanId) {
-                const res = await fetch(`https://api.jikan.moe/v4/anime/${media.jikanId}`).then(r=>r.json());
-                if (res.data) {
+                const res = await jikanFetch(`/anime/${media.jikanId}`);
+                if (res?.data) {
+                    let latestEpisodes = parseInt(res.data.episodes) || 0;
+                    // Airing shows report no count; fall back to counting aired episodes.
+                    if (!latestEpisodes) {
+                        latestEpisodes = await resolveAnimeEpisodeCount(media.jikanId);
+                    }
                     result = {
                         latestStatus: res.data.status,
-                        latestEpisodes: res.data.episodes || 0,
+                        latestEpisodes,
                         latestSeason: 1,
                         isOngoing: res.data.status === 'Currently Airing',
                         upToDate: false
@@ -52,10 +57,10 @@ export async function runSync(library, config, onProgress) {
                 }
             } else if (media.tvmazeId) {
                 const [showRes, seasonsRes] = await Promise.all([
-                    fetch(`https://api.tvmaze.com/shows/${media.tvmazeId}`).then(r=>r.json()),
-                    fetch(`https://api.tvmaze.com/shows/${media.tvmazeId}/seasons`).then(r=>r.json()).catch(()=>[])
+                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}`),
+                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}/seasons`).then(r => r || [])
                 ]);
-                
+
                 if (showRes && showRes.status) {
                     result = {
                         latestStatus: showRes.status,

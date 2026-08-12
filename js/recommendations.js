@@ -1,7 +1,7 @@
 // js/recommendations.js
 // AI Recommendation Engine
 
-import { callAI, extractJSON } from './api.js';
+import { callAI, extractJSON, jikanFetch, fetchJSONRetry } from './api.js';
 import { CAT_LABELS, CAT_EMOJI } from './constants.js';
 import { escapeHTML } from './utils.js';
 import { normalizeTitle } from './library.js';
@@ -46,8 +46,8 @@ ONLY valid JSON array, no markdown.`;
 
             if (item.category.startsWith('anime')) {
                 await delay(400); // Jikan 3 requests/sec limit
-                const res = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(item.title)}&limit=1`).then(r=>r.json());
-                if (res.data?.[0]) {
+                const res = await jikanFetch(`/anime?q=${encodeURIComponent(item.title)}&limit=1`, { retries: 1 });
+                if (res?.data?.[0]) {
                     const match = res.data[0];
                     item.poster = match.images?.jpg?.large_image_url || match.images?.jpg?.image_url;
                     item.jikanId = match.mal_id;
@@ -56,7 +56,7 @@ ONLY valid JSON array, no markdown.`;
                     if (match.type === 'Movie') item.category = 'anime-movie';
                 }
             } else if (item.category === 'series') {
-                const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`).then(r=>r.json());
+                const res = await fetchJSONRetry(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`, { retries: 1 });
                 if (res?.[0]?.show) {
                     const match = res[0].show;
                     item.poster = match.image?.original || match.image?.medium;

@@ -31,6 +31,56 @@ function isProxied() {
 let lastProviderUsed = '';
 export function getLastProvider() { return lastProviderUsed; }
 
+const JIKAN_BASE = 'https://api.jikan.moe/v4';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Generic JSON GET with backoff on rate limits and upstream errors. Returns null once
+// the retries are exhausted so callers can degrade instead of throwing.
+export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600 } = {}) {
+    let delay = baseDelay;
+    for (let attempt = 0; ; attempt++) {
+        try {
+            const res = await fetch(url, { signal });
+            if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) return null; // 404 and friends: retrying won't help
+            const data = await res.json();
+            // Jikan answers with a 200-shaped body carrying an error status in some cases.
+            if (data && typeof data.status === 'number' && data.status >= 400) {
+                throw new Error(`upstream ${data.status}`);
+            }
+            return data;
+        } catch (err) {
+            if (err.name === 'AbortError') throw err;
+            if (attempt >= retries) {
+                console.warn(`[fetch] gave up on ${url}: ${err.message}`);
+                return null;
+            }
+            await sleep(delay);
+            delay *= 2;
+        }
+    }
+}
+
+// Jikan fronts MyAnimeList and intermittently returns 504 "MyAnimeList may be down".
+export function jikanFetch(path, opts = {}) {
+    return fetchJSONRetry(`${JIKAN_BASE}${path}`, opts);
+}
+
+// MAL reports episodes:null for currently-airing shows (One Piece, etc). The paginated
+// episodes endpoint still knows how many have aired, so count them instead of showing "?".
+const JIKAN_EPISODES_PER_PAGE = 100;
+export async function resolveAnimeEpisodeCount(malId, opts = {}) {
+    const first = await jikanFetch(`/anime/${malId}/episodes?page=1`, opts);
+    if (!first?.pagination) return 0;
+
+    const lastPage = first.pagination.last_visible_page || 1;
+    if (lastPage <= 1) return (first.data || []).length;
+
+    const last = await jikanFetch(`/anime/${malId}/episodes?page=${lastPage}`, opts);
+    if (!last?.data) return (lastPage - 1) * JIKAN_EPISODES_PER_PAGE;
+    return (lastPage - 1) * JIKAN_EPISODES_PER_PAGE + last.data.length;
+}
+
 async function callViaProxy(prompt) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
