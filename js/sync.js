@@ -128,8 +128,11 @@ export async function runSync(library, config, onProgress) {
                 newSyncResults[media.id] = result;
                 media.hasNew = result.hasNewContent;
                 
+                // A completed show can still get new seasons later, so flag it rather
+                // than quietly flipping it back to "watching".
                 if (result.hasNewContent && media.status === 'completed') {
-                    media.status = 'watching';
+                    media.completedAt = media.completedAt || new Date().toISOString();
+                    media.hasNew = true;
                 }
                 
                 if (media.category.includes('series')) {

@@ -9,7 +9,7 @@ import { normalizeTitle } from './library.js';
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-export async function fetchRecommendations(library, config, excludeTitles = [], onProgress = null) {
+export async function fetchRecommendations(library, config, excludeTitles = [], onProgress = null, count = 10) {
     if (library.length < 2) {
         throw new Error('Add more titles for better recommendations!');
     }
@@ -28,7 +28,7 @@ Top rated / completed: ${liked || 'none yet'}
 All tracked and previously recommended: ${allTitles}
 Preferred categories: ${cats}
 
-Recommend 5 titles they would love that are NOT in their list.
+Recommend ${count} titles they would love that are NOT in their list.
 Return JSON array:
 [{ "title": "...", "year": 2023, "category": "anime-series|anime-movie|series|movie", "genre": "...", "description": "1-2 sentences about the show", "whyYouLikeIt": "Specific reason based on their taste (1 sentence)" }]
 ONLY valid JSON array, no markdown.`;
@@ -114,18 +114,15 @@ export function renderRecommendations(items, library, onQuickAdd, onOpenDetail, 
         return;
     }
     
-    // Anything already in the vault is dropped rather than shown as "✓ In Vault".
+    // Suggestions stay on screen after being added, just marked as owned.
     const owned = new Set(library.map(m => normalizeTitle(m.title)));
-    const visible = items.filter(item => !owned.has(normalizeTitle(item.title)));
-
-    if (visible.length === 0) {
-        grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">✅</div><h3>You already have these</h3><p>Every suggestion is in your vault. Hit Refresh for a new batch.</p></div>';
-        return;
-    }
+    const visible = items;
 
     visible.forEach(item => {
+        const isOwned = owned.has(normalizeTitle(item.title));
         const card = document.createElement('div');
         card.className = 'media-card'; // Use media-card class so it shares the grid styling
+        if (isOwned) card.classList.add('reco-added');
         card.dataset.recoTitle = normalizeTitle(item.title);
 
         const escapedTitle = escapeHTML(item.title);
@@ -154,12 +151,15 @@ export function renderRecommendations(items, library, onQuickAdd, onOpenDetail, 
                     🎯 ${escapeHTML(item.whyYouLikeIt || item.description || '')}
                 </div>
                 <div class="reco-actions">
-                    <button class="btn btn-secondary btn-sm reco-preview-btn">Preview</button>
-                    <button class="btn btn-primary btn-sm reco-add-now-btn">+ Add</button>
+                    <button class="btn btn-secondary btn-sm reco-preview-btn">${isOwned ? 'Open' : 'Preview'}</button>
+                    <button class="btn btn-primary btn-sm reco-add-now-btn" ${isOwned ? 'disabled' : ''}>${isOwned ? '✓ In Vault' : '+ Add'}</button>
                 </div>
             </div>`;
 
-        const preview = () => onQuickAdd(item);
+        const vaultItem = isOwned
+            ? library.find(m => normalizeTitle(m.title) === normalizeTitle(item.title))
+            : null;
+        const preview = () => (vaultItem && onOpenDetail ? onOpenDetail(vaultItem.id) : onQuickAdd(item));
 
         card.querySelector('.reco-preview-btn').addEventListener('click', (e) => {
             e.stopPropagation();
@@ -169,6 +169,7 @@ export function renderRecommendations(items, library, onQuickAdd, onOpenDetail, 
         const addBtn = card.querySelector('.reco-add-now-btn');
         addBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (document.body.classList.contains('read-only')) return;
             showStatusMenu(addBtn, async (status) => {
                 addBtn.disabled = true;
                 addBtn.textContent = 'Adding…';
@@ -177,6 +178,11 @@ export function renderRecommendations(items, library, onQuickAdd, onOpenDetail, 
                 addBtn.disabled = Boolean(ok);
                 if (ok) card.classList.add('reco-added');
             });
+        });
+
+        card.querySelector('.card-poster').addEventListener('click', (e) => {
+            e.stopPropagation();
+            preview();
         });
 
         card.tabIndex = 0;

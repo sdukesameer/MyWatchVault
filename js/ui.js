@@ -16,6 +16,8 @@ export function renderStats(stats) {
     if (elHours) elHours.textContent = stats.hoursWatched || 0;
     if (elEp) elEp.textContent = stats.totalEpisodes || 0;
     if (elRating) elRating.textContent = `${stats.avgRating || '0.0'}★`;
+    const elGlobal = document.getElementById('stat-global-rating');
+    if (elGlobal) elGlobal.textContent = stats.avgGlobalRating || '0.0';
     if (elGenre) elGenre.textContent = stats.topGenre || '-';
 
     document.getElementById('count-all').textContent = stats.total;
@@ -295,12 +297,14 @@ export function openDetailModal(media) {
     const newRewatchBtn = rewatchBtn.cloneNode(true);
     rewatchBtn.parentNode.replaceChild(newRewatchBtn, rewatchBtn);
     newRewatchBtn.addEventListener('click', () => {
+        if (document.body.classList.contains('read-only')) return;
         currentRewatch++;
         document.getElementById('rewatch-count').textContent = currentRewatch;
     });
 
     ssEl.querySelectorAll('.status-opt').forEach(el => {
         el.addEventListener('click', () => {
+            if (document.body.classList.contains('read-only')) return;
             ssEl.querySelectorAll('.status-opt').forEach(o => o.classList.remove('active'));
             el.classList.add('active');
             updateRewatchUI(el.dataset.status);
@@ -346,6 +350,7 @@ function renderRatingStars(rating) {
 
     wrap.querySelectorAll('.star').forEach(star => {
         const setRating = () => {
+            if (document.body.classList.contains('read-only')) return;
             const clicked = parseInt(star.dataset.value);
             // Clicking the current rating clears it, so a misclick is recoverable.
             renderRatingStars(clicked === parseInt(wrap.dataset.value) ? 0 : clicked);
@@ -416,6 +421,7 @@ export function renderSeasons(seasons) {
         });
 
         row.querySelector('.season-delete').addEventListener('click', () => {
+            if (document.body.classList.contains('read-only')) return;
             // Re-render from the remaining rows so the labels can never drift from the data.
             renderSeasons(collectSeasonRows().filter(s => s.number !== number));
             updateOverallStatusFromSeasons();
@@ -482,6 +488,7 @@ function markRowNotStarted(row) {
 // Complete → In progress → Not started. Completing a season also completes every earlier
 // one, since you can't reach season N without finishing the ones before it.
 function cycleSeasonState(row) {
+    if (document.body.classList.contains('read-only')) return;
     const number = parseInt(row.dataset.number) || 0;
     const watched = parseInt(row.querySelectorAll('.ep-input')[0].value) || 0;
 
@@ -550,12 +557,27 @@ export function showStatusMenu(anchorEl, onPick, { heading = 'Add as…' } = {})
     return menu;
 }
 
+// Collapses the section back down without fetching anything.
+export function resetSimilar() {
+    const section = document.getElementById('similar-section');
+    const list = document.getElementById('similar-list');
+    const toggle = document.getElementById('similar-toggle');
+    if (!section || !list || !toggle) return;
+    section.style.display = 'block';
+    list.style.display = 'none';
+    list.innerHTML = '';
+    toggle.setAttribute('aria-expanded', 'false');
+}
+
 export function renderSimilar(items, { loading = false, onAdd, ownedTitles = new Set() } = {}) {
     const section = document.getElementById('similar-section');
     const list = document.getElementById('similar-list');
+    const toggle = document.getElementById('similar-toggle');
     if (!section || !list) return;
 
     section.style.display = 'block';
+    list.style.display = 'grid';
+    if (toggle) toggle.setAttribute('aria-expanded', 'true');
 
     if (loading) {
         list.innerHTML = Array.from({ length: 4 },
@@ -590,6 +612,7 @@ export function renderSimilar(items, { loading = false, onAdd, ownedTitles = new
             const btn = card.querySelector('.similar-add');
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (document.body.classList.contains('read-only')) return;
                 // Pick the watch status instead of always defaulting to Plan to Watch.
                 showStatusMenu(btn, async (status) => {
                     btn.disabled = true;

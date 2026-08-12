@@ -31,6 +31,7 @@
         WATCHVAULT
     </div>
     <div class="nav-actions">
+        <button class="btn btn-ghost btn-sm btn-icon" id="theme-toggle-btn" title="Toggle light / dark">🌙</button>
         <button class="btn btn-accent2 btn-sm" id="sync-nav-btn" title="Sync Status">⚡<span class="btn-label">Sync Status</span></button>
         <button class="btn btn-warning btn-sm" id="reco-nav-btn" title="Recommend">✨<span class="btn-label">Recommend</span></button>
         <button class="btn btn-ghost btn-sm btn-icon" id="settings-btn" title="Settings">⚙️</button>
@@ -87,9 +88,13 @@
                     </div>
                     <div class="stat-box">
                         <div class="stat-val" id="stat-avg-rating">0.0★</div>
-                        <div class="stat-lbl">Avg Rating</div>
+                        <div class="stat-lbl">Your Avg Rating</div>
                     </div>
                     <div class="stat-box">
+                        <div class="stat-val" id="stat-global-rating">0.0</div>
+                        <div class="stat-lbl">Global Avg 🌐</div>
+                    </div>
+                    <div class="stat-box" style="grid-column:1/-1;">
                         <div class="stat-val" id="stat-fav-genre">-</div>
                         <div class="stat-lbl">Top Genre</div>
                     </div>
@@ -289,8 +294,12 @@
                 <button class="add-season-btn" id="add-season-btn">＋ Add Season</button>
             </div>
             <div class="similar-section" id="similar-section" style="display:none;">
-                <div class="tracker-title">More Like This</div>
-                <div class="similar-list" id="similar-list"></div>
+                <button class="similar-toggle" id="similar-toggle" aria-expanded="false">
+                    <span class="similar-chevron">›</span>
+                    <span>More Like This</span>
+                    <span class="similar-hint">tap to load suggestions</span>
+                </button>
+                <div class="similar-list" id="similar-list" style="display:none;"></div>
             </div>
         </div>
         <div class="modal-footer">
@@ -375,23 +384,39 @@
                     <button class="btn btn-primary btn-sm" id="cloud-login-btn">Unlock</button>
                 </div>
                 <div id="cloud-actions" style="display:none;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                    <button class="btn btn-secondary btn-sm" id="cloud-pull-btn">⬇ Pull from Cloud</button>
-                    <button class="btn btn-secondary btn-sm" id="cloud-push-btn" style="color:var(--accent2);">⬆ Push to Cloud</button>
-                    <button class="btn btn-ghost btn-sm" id="cloud-logout-btn">Lock</button>
+                    <button class="btn btn-ghost btn-sm" id="cloud-logout-btn">Lock editing</button>
                 </div>
-                <div id="cloud-readonly-actions" style="display:none;margin-top:10px;">
-                    <button class="btn btn-secondary btn-sm" id="cloud-pull-ro-btn">⬇ Pull latest from Cloud</button>
-                </div>
+                <div class="cloud-status" id="cloud-sync-state" style="margin-top:8px;"></div>
             </div>
             <p style="font-size: 14px; color: var(--text-dim); line-height: 1.6;">
                 API keys are securely managed server-side. For local development, update your <code>js/env.js</code> file.
             </p>
             <div style="border-top:1px solid var(--border);padding-top:20px; display:flex; flex-direction:column; gap:10px;">
-                <button class="btn btn-secondary" id="export-btn" style="color:var(--accent2); justify-content:center;">📤 Export Backup (JSON)</button>
-                <label class="btn btn-secondary" style="color:var(--success); justify-content:center; cursor:pointer;">
-                    📥 Import Backup (JSON)
-                    <input type="file" id="import-file-input" accept=".json" style="display:none;">
+                <div class="field-label">Preferences</div>
+                <label class="settings-row">
+                    <span>Auto-sync on open</span>
+                    <input type="checkbox" id="opt-autosync" checked>
                 </label>
+                <label class="settings-row">
+                    <span>Check for new seasons daily</span>
+                    <input type="checkbox" id="opt-daily-sync" checked>
+                </label>
+                <label class="settings-row">
+                    <span>Fetch missing artwork automatically</span>
+                    <input type="checkbox" id="opt-artwork" checked>
+                </label>
+                <label class="settings-row">
+                    <span>Suggestions per batch</span>
+                    <select id="opt-reco-batch" class="input-field" style="width:auto;padding:5px 8px;font-size:12px;">
+                        <option value="5">5</option>
+                        <option value="10" selected>10</option>
+                        <option value="15">15</option>
+                    </select>
+                </label>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:20px; display:flex; flex-direction:column; gap:10px;">
+                <button class="btn btn-secondary" id="csv-import-btn" style="color:var(--success); justify-content:center;">📥 Import from CSV</button>
+                <button class="btn btn-secondary" id="export-btn" style="color:var(--accent2); justify-content:center;">📤 Export CSV</button>
             </div>
             <div style="border-top:1px solid var(--border);padding-top:20px; margin-top:10px;">
                 <button class="btn btn-ghost" id="clear-all-btn" style="color:var(--danger); width:100%; justify-content:center;">🗑 Clear All Data</button>
@@ -399,6 +424,65 @@
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" id="settings-cancel">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════ CSV IMPORT WIZARD ══════ -->
+<div id="csv-modal" class="modal-overlay hidden">
+    <div class="modal-card wide">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title">📥 IMPORT FROM CSV</div>
+                <div class="modal-subtitle" id="csv-step-label">Step 1 of 3 — choose a file</div>
+            </div>
+            <button class="modal-close" id="csv-close">✕</button>
+        </div>
+        <div class="modal-body">
+            <!-- Step 1: file -->
+            <div id="csv-step-file">
+                <p style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-bottom:14px;">
+                    Pick a <code>.csv</code> file. A header row is expected — you'll map the columns next.
+                    Exports from MyAnimeList, Trakt, IMDb and Letterboxd generally work.
+                </p>
+                <label class="btn btn-secondary" style="justify-content:center;cursor:pointer;width:100%;">
+                    Choose CSV file…
+                    <input type="file" id="csv-file-input" accept=".csv,text/csv" style="display:none;">
+                </label>
+                <div id="csv-file-error" style="display:none;color:var(--danger);font-size:13px;margin-top:12px;"></div>
+            </div>
+
+            <!-- Step 2: map columns -->
+            <div id="csv-step-map" style="display:none;">
+                <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px;" id="csv-map-summary"></p>
+                <div class="csv-map-grid" id="csv-map-grid"></div>
+                <div style="margin-top:16px;">
+                    <label class="settings-row">
+                        <span>Default type for rows with no type column</span>
+                        <select id="csv-default-cat" class="input-field" style="width:auto;padding:5px 8px;font-size:12px;">
+                            <option value="movie">Movie</option>
+                            <option value="series">Web Series</option>
+                            <option value="anime-series">Anime Series</option>
+                            <option value="anime-movie">Anime Movie</option>
+                        </select>
+                    </label>
+                    <label class="settings-row">
+                        <span>Look up missing details online</span>
+                        <input type="checkbox" id="csv-lookup" checked>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Step 3: review -->
+            <div id="csv-step-review" style="display:none;">
+                <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;" id="csv-review-summary"></p>
+                <div class="csv-review-list" id="csv-review-list"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" id="csv-back-btn" style="margin-right:auto;display:none;">← Back</button>
+            <button class="btn btn-secondary" id="csv-cancel-btn">Cancel</button>
+            <button class="btn btn-primary" id="csv-next-btn" disabled>Next →</button>
         </div>
     </div>
 </div>

@@ -4,7 +4,7 @@ import { callTMDB, jikanFetch, fetchJSONRetry } from './api.js';
 
 let activeSearchController = null;
 
-export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCachedSearch, lib, onAdd, onPreview) {
+export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCachedSearch, lib, onAdd, onPreview, onOpenOwned) {
     const handleSearch = async (query) => {
         if (query.length < 2) { 
             dropdown.style.display = 'none'; 
@@ -128,16 +128,49 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
             return;
         }
 
-        // Hide titles already in the vault — this dropdown is for adding new things.
-        const owned = new Set(state.library.map(m => lib.normalizeTitle(m.title)));
+        // New titles come first; anything already tracked is listed separately below so
+        // you can still see (and jump to) what you own.
+        const owned = new Map(state.library.map(m => [lib.normalizeTitle(m.title), m]));
         const fresh = results.filter(item => !owned.has(lib.normalizeTitle(item.title)));
-
-        if (fresh.length === 0) {
-            dropdown.innerHTML = `<div style="padding:16px;color:var(--text-muted);text-align:center;">Everything matching “${escapeHTML(query)}” is already in your vault.</div>`;
-            return;
-        }
+        const already = results.filter(item => owned.has(lib.normalizeTitle(item.title)));
 
         dropdown.innerHTML = '';
+        const freshWrap = document.createElement('div');
+        dropdown.appendChild(freshWrap);
+
+        if (fresh.length === 0 && already.length) {
+            const note = document.createElement('div');
+            note.style.cssText = 'padding:12px 16px;color:var(--text-muted);font-size:12px;text-align:center;';
+            note.textContent = 'No new titles for this search.';
+            freshWrap.appendChild(note);
+        }
+
+        if (already.length) {
+            const head = document.createElement('div');
+            head.className = 'search-group-head';
+            head.textContent = `Already in your vault (${already.length})`;
+            dropdown.appendChild(head);
+            const ownedWrap = document.createElement('div');
+            ownedWrap.className = 'search-owned-group';
+            already.forEach(item => {
+                const media = owned.get(lib.normalizeTitle(item.title));
+                const row = document.createElement('div');
+                row.className = 'search-item search-item-owned';
+                row.innerHTML = `
+                    <div class="card-poster-placeholder" style="width:40px;height:56px;font-size:18px;border-radius:6px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;">✓</div>
+                    <div class="search-item-info">
+                        <div class="search-item-title">${escapeHTML(item.title)}</div>
+                        <div class="search-item-meta">${escapeHTML(media.status || '')} · tap to open</div>
+                    </div>`;
+                row.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    onOpenOwned?.(media.id);
+                });
+                ownedWrap.appendChild(row);
+            });
+            dropdown.appendChild(ownedWrap);
+        }
+
         fresh.forEach((item, idx) => {
             const inLib = false;
 
@@ -177,7 +210,7 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
                 });
             }
             
-            dropdown.appendChild(div);
+            freshWrap.appendChild(div);
         });
     };
 

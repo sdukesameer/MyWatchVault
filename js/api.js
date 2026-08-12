@@ -176,8 +176,63 @@ export async function wikipediaSummary(title, opts = {}) {
     };
 }
 
+// ── Poster URL cache ─────────────────────────────────────────────
+// Artwork lookups are the most repeated network calls in the app (and posters are not
+// stored in the cloud DB), so remember the resolved URL per title.
+const POSTER_CACHE_KEY = 'watchvault_poster_cache';
+const POSTER_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+let posterCache = null;
+
+function posterCacheKey(title, category) {
+    return `${category || ''}|${String(title || '').trim().toLowerCase()}`;
+}
+
+function loadPosterCache() {
+    if (posterCache) return posterCache;
+    posterCache = new Map();
+    try {
+        const raw = JSON.parse(localStorage.getItem(POSTER_CACHE_KEY) || '[]');
+        const now = Date.now();
+        if (Array.isArray(raw)) {
+            raw.forEach(([k, entry]) => {
+                if (entry && now - entry.t < POSTER_CACHE_TTL) posterCache.set(k, entry);
+            });
+        }
+    } catch { /* ignore a corrupt cache */ }
+    return posterCache;
+}
+
+function savePosterCache() {
+    try {
+        localStorage.setItem(POSTER_CACHE_KEY, JSON.stringify([...loadPosterCache()]));
+    } catch {
+        try { localStorage.removeItem(POSTER_CACHE_KEY); } catch {}
+    }
+}
+
+export function getCachedPoster(title, category) {
+    const entry = loadPosterCache().get(posterCacheKey(title, category));
+    return entry ? entry.url : undefined; // undefined = never looked up, null = looked up, none found
+}
+
+export function setCachedPoster(title, category, url) {
+    const cache = loadPosterCache();
+    cache.set(posterCacheKey(title, category), { url: url || null, t: Date.now() });
+    while (cache.size > 400) cache.delete(cache.keys().next().value);
+    savePosterCache();
+}
+
 // Best-effort poster lookup across the keyless sources, cheapest/most accurate first.
 export async function findPosterFallback({ title, category }, opts = {}) {
+    const cached = getCachedPoster(title, category);
+    if (cached !== undefined) return cached;
+
+    const url = await resolvePosterFallback({ title, category }, opts);
+    setCachedPoster(title, category, url);
+    return url;
+}
+
+async function resolvePosterFallback({ title, category }, opts = {}) {
     try {
         if (String(category || '').startsWith('anime')) {
             const k = await kitsuAnime(title, opts);

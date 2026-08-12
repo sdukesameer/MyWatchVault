@@ -1,11 +1,17 @@
 // js/dashboard.js
 // Handles Stats computation, Continue Watching, and Upcoming logic
 
+// Media types that some exports dump into the genre column.
+const NON_GENRES = new Set([
+    'anime', 'series', 'movie', 'movies', 'tv', 'tv show', 'tv series', 'web series',
+    'film', 'show', 'ova', 'ona', 'special', 'unknown', 'n/a'
+]);
+
 let lastLibraryHash = '';
 let cachedStats = null;
 
 function computeLibraryHash(library) {
-    return library.length + '-' + library.map(m => m.status + m.addedAt + m.hasNew + (m.seasons?.length||0) + m.rating).join('');
+    return library.length + '-' + library.map(m => m.status + m.addedAt + m.hasNew + (m.seasons?.length||0) + m.rating + (m.globalRating||'') + (m.genre||'')).join('');
 }
 
 export function getStats(library) {
@@ -18,6 +24,8 @@ export function getStats(library) {
     let eps = 0;
     let sumRating = 0;
     let ratedCount = 0;
+    let sumGlobal = 0;
+    let globalCount = 0;
     const catCounts = { 'anime-series': 0, 'anime-movie': 0, 'series': 0, 'movie': 0 };
     const genreCounts = {};
 
@@ -28,11 +36,17 @@ export function getStats(library) {
             ratedCount++;
         }
         
+        // Average of the public/critic scores, so you can see how well-regarded
+        // the things you watch actually are.
+        const global = parseFloat(m.globalRating);
+        if (isFinite(global) && global > 0) { sumGlobal += global; globalCount++; }
+
         if (m.genre) {
-            const genres = m.genre.split(',').map(g => g.trim());
-            genres.forEach(g => {
-                if (!genreCounts[g]) genreCounts[g] = 0;
-                genreCounts[g]++;
+            m.genre.split(',').forEach(raw => {
+                const g = raw.trim();
+                // Several sources put the media type in the genre column; those aren't genres.
+                if (!g || NON_GENRES.has(g.toLowerCase())) return;
+                genreCounts[g] = (genreCounts[g] || 0) + 1;
             });
         }
 
@@ -57,6 +71,8 @@ export function getStats(library) {
         hoursWatched: Math.round(hours),
         totalEpisodes: eps,
         avgRating: ratedCount ? (sumRating / ratedCount).toFixed(1) : '0.0',
+        avgGlobalRating: globalCount ? (sumGlobal / globalCount).toFixed(1) : '0.0',
+        ratedCount,
         topGenre,
         catCounts
     };

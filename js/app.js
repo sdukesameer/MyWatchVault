@@ -10,6 +10,7 @@ import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModa
 import { setupSearch } from './search.js';
 import { getStats, getDashboardItems } from './dashboard.js';
 import * as cloud from './cloud.js';
+import { parseCSV, guessMapping, buildRows, toCSV, CSV_FIELDS } from './csv.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, normalizeTags, isSeriesCategory } from './constants.js';
 
 const state = {
@@ -182,13 +183,17 @@ const openDetail = (mediaOrId) => {
         render(); // Clear badge immediately
     }
     ui.openDetailModal(media);
-    loadSimilarFor(media);
+    prepareSimilar(media);
 };
 
 // Applies a chosen watch status to a not-yet-saved item, keeping the season data
 // consistent — "Completed" should mean every episode is marked watched.
 function applyStatusToItem(item, status) {
     const seasons = (item.seasons || []).map(s => ({ ...s }));
+    // Remember when it was finished — a completed show can still get new seasons later.
+    const completedAt = status === 'completed'
+        ? (item.completedAt || new Date().toISOString())
+        : item.completedAt;
     if (status === 'completed') {
         seasons.forEach(s => {
             const total = parseInt(s.total) || 0;
@@ -196,12 +201,26 @@ function applyStatusToItem(item, status) {
             else s.completed = true; // unknown episode count
         });
     }
-    return { ...item, status, seasons };
+    return { ...item, status, seasons, completedAt };
 }
 
-// "More Like This" — populated after the modal opens so it never delays it.
+// "More Like This" stays collapsed until asked for, so opening an item costs no API calls.
 let similarToken = 0;
+let similarTarget = null;
+const similarLoaded = new Set();
+
+function prepareSimilar(media) {
+    similarTarget = media;
+    ui.resetSimilar();
+    // Re-expand automatically only if we already have this item's suggestions cached.
+    if (similarLoaded.has(similarKey(media))) loadSimilarFor(media);
+}
+
+const similarKey = m => `${m.category}|${String(m.title).toLowerCase()}`;
+
 async function loadSimilarFor(media) {
+    if (!media) return;
+    similarLoaded.add(similarKey(media));
     const token = ++similarToken;
     ui.renderSimilar([], { loading: true });
 
@@ -211,6 +230,7 @@ async function loadSimilarFor(media) {
     ui.renderSimilar(similar, {
         ownedTitles: new Set(state.library.map(m => lib.normalizeTitle(m.title))),
         onAdd: async (item, status = 'plan-to-watch') => {
+            if (!guardEdit()) return false;
             const dupe = state.library.some(m => lib.normalizeTitle(m.title) === lib.normalizeTitle(item.title));
             if (dupe) return true;
             try {
@@ -288,6 +308,7 @@ function drawRecos() {
 
 // Adds a recommendation straight to the vault with the chosen status.
 async function addRecoWithStatus(item, status) {
+    if (!guardEdit()) return false;
     const dupe = state.library.some(m => lib.normalizeTitle(m.title) === lib.normalizeTitle(item.title));
     if (dupe) { showToast(`"${item.title}" is already in your vault`, 'info'); return true; }
     try {
@@ -355,6 +376,52 @@ function setCachedSearch(query, results) {
 }
 
 
+// ── Theme ───────────────────────────────────────────────────────
+const THEME_KEY = 'watchvault_theme';
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const btn = document.getElementById('theme-toggle-btn');
+    if (btn) {
+        btn.textContent = theme === 'light' ? '☀️' : '🌙';
+        btn.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+    }
+    try { localStorage.setItem(THEME_KEY, theme); } catch {}
+}
+
+function initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch {}
+    applyTheme(saved || 'dark');
+}
+
+// ── Preferences ─────────────────────────────────────────────────
+const PREFS_KEY = 'watchvault_prefs';
+const DEFAULT_PREFS = { autosync: true, dailySync: true, artwork: true, recoBatch: 10 };
+let prefs = { ...DEFAULT_PREFS };
+
+function loadPrefs() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+        prefs = { ...DEFAULT_PREFS, ...saved };
+    } catch { prefs = { ...DEFAULT_PREFS }; }
+    return prefs;
+}
+
+function savePrefs() {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch {}
+}
+
+function syncPrefsToUI() {
+    const map = { 'opt-autosync': 'autosync', 'opt-daily-sync': 'dailySync', 'opt-artwork': 'artwork' };
+    Object.entries(map).forEach(([id, key]) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = Boolean(prefs[key]);
+    });
+    const batch = document.getElementById('opt-reco-batch');
+    if (batch) batch.value = String(prefs.recoBatch);
+}
+
 // ── Cloud sync (Turso) ──────────────────────────────────────────
 // When a cloud DB is configured, editing is gated behind the admin passcode. With no
 // DB configured the app stays purely local and every control remains available.
@@ -375,7 +442,7 @@ function applyEditPermissions() {
 
     [
         'manual-add-btn', 'select-mode-btn', 'detail-save-btn', 'detail-delete-btn',
-        'add-season-btn', 'detail-sync-btn', 'clear-all-btn', 'import-file-input'
+        'add-season-btn', 'detail-sync-btn', 'clear-all-btn', 'csv-import-btn'
     ].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.disabled = !editable;
@@ -383,6 +450,13 @@ function applyEditPermissions() {
 
     const banner = document.getElementById('readonly-banner');
     if (banner) banner.style.display = editable ? 'none' : 'flex';
+
+    // Lock the detail modal's own inputs too, so nothing looks editable when it isn't.
+    ['detail-tags', 'detail-notes', 'detail-category'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !editable;
+    });
+    document.querySelectorAll('#seasons-grid .ep-input').forEach(el => { el.disabled = !editable; });
 }
 
 function refreshCloudUI() {
@@ -398,8 +472,13 @@ function refreshCloudUI() {
         ? '🔓 Editing unlocked for this tab.'
         : '🔒 Read-only. Enter the admin passcode to edit.';
     document.getElementById('cloud-login-row').style.display = editor ? 'none' : 'flex';
+    const syncState = document.getElementById('cloud-sync-state');
+    if (syncState) {
+        syncState.textContent = editor
+            ? 'Changes save to the cloud automatically.'
+            : 'Latest cloud data is pulled automatically when you open the app.';
+    }
     document.getElementById('cloud-actions').style.display = editor ? 'flex' : 'none';
-    document.getElementById('cloud-readonly-actions').style.display = editor ? 'none' : 'block';
 
     applyEditPermissions();
 }
@@ -433,6 +512,133 @@ async function pullFromCloud({ silent = false } = {}) {
         if (!silent) showToast(`Pull failed: ${err.message}`, 'error');
         return false;
     }
+}
+
+// ── CSV import wizard ───────────────────────────────────────────
+const csv = { rows: [], headers: [], mapping: {}, items: [], step: 1 };
+
+function openCsvWizard() {
+    csv.rows = []; csv.headers = []; csv.mapping = {}; csv.items = []; csv.step = 1;
+    document.getElementById('csv-file-input').value = '';
+    document.getElementById('csv-file-error').style.display = 'none';
+    showCsvStep(1);
+    ui.openModal('csv-modal');
+}
+
+function showCsvStep(step) {
+    csv.step = step;
+    const labels = {
+        1: 'Step 1 of 3 — choose a file',
+        2: 'Step 2 of 3 — map the columns',
+        3: 'Step 3 of 3 — review and confirm'
+    };
+    document.getElementById('csv-step-label').textContent = labels[step];
+    document.getElementById('csv-step-file').style.display = step === 1 ? 'block' : 'none';
+    document.getElementById('csv-step-map').style.display = step === 2 ? 'block' : 'none';
+    document.getElementById('csv-step-review').style.display = step === 3 ? 'block' : 'none';
+    document.getElementById('csv-back-btn').style.display = step > 1 ? 'inline-flex' : 'none';
+
+    const next = document.getElementById('csv-next-btn');
+    next.textContent = step === 3 ? 'Import' : 'Next →';
+    next.disabled = step === 1 ? csv.rows.length === 0
+        : step === 2 ? csv.mapping.title === undefined
+        : false;
+}
+
+function renderCsvMapping() {
+    const grid = document.getElementById('csv-map-grid');
+    document.getElementById('csv-map-summary').textContent =
+        `Found ${csv.rows.length - 1} rows and ${csv.headers.length} columns. Confirm which column holds what.`;
+
+    grid.innerHTML = CSV_FIELDS.map(f => `
+        <div class="csv-map-row">
+            <label>${escapeHTML(f.label)}${f.required ? ' <span class="req">*</span>' : ''}</label>
+            <select class="input-field" data-field="${f.key}">
+                <option value="">— not in file —</option>
+                ${csv.headers.map((h, i) =>
+                    `<option value="${i}" ${csv.mapping[f.key] === i ? 'selected' : ''}>${escapeHTML(h || `Column ${i + 1}`)}</option>`
+                ).join('')}
+            </select>
+        </div>`).join('');
+
+    grid.querySelectorAll('select').forEach(sel => {
+        sel.addEventListener('change', () => {
+            const key = sel.dataset.field;
+            if (sel.value === '') delete csv.mapping[key];
+            else csv.mapping[key] = parseInt(sel.value);
+            showCsvStep(2);
+        });
+    });
+}
+
+function renderCsvReview() {
+    const owned = new Set(state.library.map(m => lib.normalizeTitle(m.title)));
+    const fresh = csv.items.filter(i => !owned.has(lib.normalizeTitle(i.title)));
+    const dupes = csv.items.length - fresh.length;
+
+    document.getElementById('csv-review-summary').innerHTML =
+        `<strong style="color:var(--text)">${fresh.length}</strong> to import`
+        + (dupes ? ` · ${dupes} already in your vault (skipped)` : '')
+        + `. Titles are editable — fix any that look wrong before importing.`;
+
+    const list = document.getElementById('csv-review-list');
+    list.innerHTML = '';
+    csv.items.forEach((item, idx) => {
+        const dupe = owned.has(lib.normalizeTitle(item.title));
+        item._skip = dupe;
+
+        const row = document.createElement('div');
+        row.className = 'csv-review-row';
+        row.innerHTML = `
+            <input class="csv-title-input" value="${escapeHTML(item.title)}" ${dupe ? 'disabled' : ''}>
+            <span class="csv-badge ${dupe ? 'dupe' : 'new'}">${dupe ? 'in vault' : CAT_LABELS[item.category] || item.category}</span>
+            <label class="csv-skip"><input type="checkbox" ${dupe ? 'checked disabled' : ''}> skip</label>`;
+
+        row.querySelector('.csv-title-input').addEventListener('input', (e) => {
+            csv.items[idx].title = e.target.value;
+        });
+        const skipBox = row.querySelector('.csv-skip input');
+        skipBox.addEventListener('change', () => { csv.items[idx]._skip = skipBox.checked; });
+
+        list.appendChild(row);
+    });
+}
+
+async function runCsvImport() {
+    const queue = csv.items.filter(i => !i._skip && i.title.trim());
+    if (!queue.length) { showToast('Nothing selected to import', 'info'); return; }
+
+    ui.closeModal('csv-modal');
+    const lookup = document.getElementById('csv-lookup').checked;
+    let added = 0;
+
+    for (let i = 0; i < queue.length; i++) {
+        const item = queue[i];
+        showLoading(`Importing ${i + 1} of ${queue.length}…`, item.title);
+
+        // Skip anything that arrived twice in the same file.
+        if (state.library.some(m => lib.normalizeTitle(m.title) === lib.normalizeTitle(item.title))) continue;
+
+        let enriched = { ...item };
+        if (lookup) {
+            try {
+                const seasons = await fetchDeepDetails(enriched);
+                enriched.seasons = seasons;
+                if (!enriched.poster) {
+                    enriched.poster = await findPosterFallback(enriched).catch(() => null);
+                    enriched.posterTried = true;
+                }
+            } catch { /* keep the plain row */ }
+        }
+
+        lib.addMedia(state.library, applyStatusToItem(enriched, enriched.status));
+        added++;
+    }
+
+    hideLoading();
+    render();
+    syncUp();
+    showToast(`Imported ${added} title${added === 1 ? '' : 's'} ✓`, 'success');
 }
 
 // ── Bulk selection ──────────────────────────────────────────────
@@ -545,6 +751,7 @@ async function backfillPosters() {
 
 // ── Sync Handler ────────────────────────────────────────────────
 async function handleRunSync() {
+    if (!guardEdit()) return;
     try {
         let completed = 0;
         const total = state.library.length;
@@ -586,9 +793,10 @@ async function handleFetchRecos(append = false) {
         
         const excludeTitles = append ? allRecosLoaded.map(r => r.title) : [];
         excludeTitles.push(...state.library.map(m => m.title));
+        const batchSize = append ? 5 : (prefs.recoBatch || 10);
         const recos = await fetchRecommendations(state.library, state.config, excludeTitles, (msg) => {
             showLoading(append ? 'Loading more...' : 'Finding recommendations…', msg);
-        });
+        }, batchSize);
         
         if (append) {
             allRecosLoaded = [...allRecosLoaded, ...recos];
@@ -624,7 +832,7 @@ async function handleFetchRecos(append = false) {
 
         // Show the grid straight away, then stream artwork into each card as it resolves.
         drawRecos();
-        document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
+        document.getElementById('load-more-reco-wrap').style.display = allRecosLoaded.length ? 'block' : 'none';
 
         for (const item of recos) {
             await enhanceRecommendation(item, state.config);
@@ -753,6 +961,11 @@ function bindEvents() {
 
         state.previewItem = { ...item, id: 'preview_' + Date.now(), status: 'plan-to-watch', seasons };
         openDetail(state.previewItem);
+    }, (mediaId) => {
+        // Tapping an "already in your vault" search hit opens that item.
+        dropdown.style.display = 'none';
+        searchInput.value = '';
+        openDetail(mediaId);
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { dropdown.style.display = 'none'; document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); } });
 
@@ -930,7 +1143,13 @@ function bindEvents() {
             syncUp();
         } else {
             if (!guardEdit()) return;
-            if (lib.updateMedia(state.library, data.id, { ...data, updatedAt: new Date().toISOString() })) {
+            const existing = state.library.find(m => m.id === data.id);
+            const stamped = { ...data, updatedAt: new Date().toISOString() };
+            // Stamp when it was finished, so future syncs can spot new seasons since then.
+            if (stamped.status === 'completed' && !existing?.completedAt) {
+                stamped.completedAt = stamped.updatedAt;
+            }
+            if (lib.updateMedia(state.library, data.id, stamped)) {
                 ui.closeModal('detail-modal');
                 render();
                 showToast('Saved ✓', 'success');
@@ -940,6 +1159,7 @@ function bindEvents() {
     });
 
     document.getElementById('detail-sync-btn').addEventListener('click', async () => {
+        if (!guardEdit()) return;
         const data = ui.collectDetailData();
         let media = state.library.find(m => m.id === data.id);
         if (!media && data.id.startsWith('preview_')) media = state.previewItem;
@@ -1032,6 +1252,38 @@ function bindEvents() {
     document.getElementById('settings-modal').addEventListener('click', e => { if (e.target === e.currentTarget) ui.closeModal('settings-modal'); });
 
     // Cloud sync controls
+    document.getElementById('theme-toggle-btn').addEventListener('click', () => {
+        const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        applyTheme(next);
+    });
+
+    document.getElementById('similar-toggle').addEventListener('click', () => {
+        const list = document.getElementById('similar-list');
+        const toggle = document.getElementById('similar-toggle');
+        if (toggle.getAttribute('aria-expanded') === 'true') {
+            list.style.display = 'none';
+            toggle.setAttribute('aria-expanded', 'false');
+        } else if (list.children.length) {
+            list.style.display = 'grid';
+            toggle.setAttribute('aria-expanded', 'true');
+        } else {
+            loadSimilarFor(similarTarget);   // first expand does the fetching
+        }
+    });
+
+    // Preferences
+    const prefMap = { 'opt-autosync': 'autosync', 'opt-daily-sync': 'dailySync', 'opt-artwork': 'artwork' };
+    Object.entries(prefMap).forEach(([id, key]) => {
+        document.getElementById(id).addEventListener('change', (e) => {
+            prefs[key] = e.target.checked;
+            savePrefs();
+        });
+    });
+    document.getElementById('opt-reco-batch').addEventListener('change', (e) => {
+        prefs.recoBatch = parseInt(e.target.value) || 10;
+        savePrefs();
+    });
+
     document.getElementById('readonly-unlock-btn').addEventListener('click', () => {
         ui.openModal('settings-modal');
         refreshCloudUI();
@@ -1046,6 +1298,7 @@ function bindEvents() {
             input.value = '';
             refreshCloudUI();
             showToast('Editing unlocked ✓', 'success');
+            await pullFromCloud({ silent: true });   // always start from the latest copy
         } catch (err) {
             showToast(err.message, 'error');
         }
@@ -1058,50 +1311,73 @@ function bindEvents() {
         refreshCloudUI();
         showToast('Locked — now read-only', 'info');
     });
-    document.getElementById('cloud-push-btn').addEventListener('click', async () => {
-        showLoading('Saving to cloud…');
-        try {
-            const res = await cloud.push(state.library, lib.loadSyncMeta());
-            showToast(`Pushed ${res.count} titles to cloud ✓`, 'success');
-        } catch (err) {
-            showToast(`Push failed: ${err.message}`, 'error');
-        }
-        hideLoading();
-    });
-    const doPull = async () => {
-        showLoading('Loading from cloud…');
-        await pullFromCloud();
-        hideLoading();
-    };
-    document.getElementById('cloud-pull-btn').addEventListener('click', doPull);
-    document.getElementById('cloud-pull-ro-btn').addEventListener('click', doPull);
 
     document.getElementById('export-btn').addEventListener('click', () => {
-        lib.exportLibrary(state.library, state.syncResults);
-        showToast('Export triggered', 'success');
+        if (!state.library.length) { showToast('Nothing to export yet', 'info'); return; }
+        const blob = new Blob([toCSV(state.library)], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `watchvault-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('CSV exported ✓', 'success');
     });
 
-    // JSON Import
-    document.getElementById('import-file-input').addEventListener('change', (e) => {
+    document.getElementById('csv-import-btn').addEventListener('click', () => {
+        if (!guardEdit()) return;
+        ui.closeModal('settings-modal');
+        openCsvWizard();
+    });
+
+    // CSV wizard navigation
+    setupModalAccessibility('csv-modal', 'csv-close', () => ui.closeModal('csv-modal'));
+    document.getElementById('csv-cancel-btn').addEventListener('click', () => ui.closeModal('csv-modal'));
+    document.getElementById('csv-modal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) ui.closeModal('csv-modal');
+    });
+
+    document.getElementById('csv-file-input').addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
+        const err = document.getElementById('csv-file-error');
         const reader = new FileReader();
-        reader.onload = (e) => {
-            const jsonStr = e.target.result;
-            const res = lib.importLibrary(jsonStr);
-            if (res.success) {
-                state.library = res.library;
-                state.syncResults = res.syncResults;
-                render();
-                showToast(`Imported ${res.count} titles!`, 'success');
-                ui.closeModal('settings-modal');
-            } else {
-                showToast(`Import failed: ${res.error}`, 'error');
+        reader.onload = (ev) => {
+            try {
+                const rows = parseCSV(ev.target.result);
+                if (rows.length < 2) throw new Error('Needs a header row plus at least one data row');
+                csv.rows = rows;
+                csv.headers = rows[0].map(h => String(h).trim());
+                csv.mapping = guessMapping(csv.headers);
+                err.style.display = 'none';
+                renderCsvMapping();
+                showCsvStep(2);
+            } catch (ex) {
+                csv.rows = [];
+                err.textContent = `Couldn't read that file: ${ex.message}`;
+                err.style.display = 'block';
+                showCsvStep(1);
             }
-            document.getElementById('import-file-input').value = '';
+        };
+        reader.onerror = () => {
+            err.textContent = 'Could not read the file.';
+            err.style.display = 'block';
         };
         reader.readAsText(file);
+    });
+
+    document.getElementById('csv-back-btn').addEventListener('click', () => showCsvStep(csv.step - 1));
+    document.getElementById('csv-next-btn').addEventListener('click', () => {
+        if (csv.step === 2) {
+            csv.items = buildRows(csv.rows, csv.mapping, {
+                defaultCategory: document.getElementById('csv-default-cat').value
+            });
+            if (!csv.items.length) { showToast('No usable rows found — check the Title column', 'error'); return; }
+            renderCsvReview();
+            showCsvStep(3);
+        } else if (csv.step === 3) {
+            runCsvImport();
+        }
     });
 
     document.getElementById('clear-all-btn').addEventListener('click', () => {
@@ -1163,6 +1439,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     state.syncResults = lib.loadSyncResults();
     loadSearchCache();
+    initTheme();
+    loadPrefs();
+    syncPrefsToUI();
 
     document.getElementById('add-year').max = new Date().getFullYear() + 5;
 
@@ -1172,16 +1451,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Cloud sync: if a database is configured, its copy is the source of truth.
     await cloud.checkCloud();
     refreshCloudUI();
-    if (cloud.isCloudEnabled()) {
+    if (cloud.isCloudEnabled() && prefs.autosync) {
         await pullFromCloud({ silent: true });
     }
 
     // Fill in any missing artwork quietly in the background.
-    setTimeout(() => backfillPosters(), 1200);
+    if (prefs.artwork) setTimeout(() => backfillPosters(), 1200);
 
     // Daily auto-sync check
     const today = new Date().toDateString();
-    if (localStorage.getItem('lastAutoSyncDate') !== today) {
+    if (prefs.dailySync && localStorage.getItem('lastAutoSyncDate') !== today) {
         localStorage.setItem('lastAutoSyncDate', today);
         setTimeout(() => {
             if (state.library.length > 0) handleRunSync();

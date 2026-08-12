@@ -27,6 +27,55 @@
   --transition: 0.22s cubic-bezier(0.4,0,0.2,1);
 }
 
+/* Light theme — same tokens, re-pointed so every component follows along. */
+:root[data-theme="light"] {
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #eef1f7;
+  --border: #dde3ec;
+  --border-bright: #c3cddb;
+  --text: #141924;
+  --text-dim: #55637a;
+  --text-muted: #8a97ab;
+  --accent: #d81b7a;
+  --accent2: #0090b8;
+  --accent3: #b8860b;
+  --success: #00996f;
+  --warning: #d97706;
+  --danger: #dc2626;
+
+  --shadow-card: 0 4px 20px rgba(20,25,36,0.10);
+  --shadow-glow: 0 0 40px rgba(216,27,122,0.10);
+}
+
+/* A few dark-only treatments need toning down on light backgrounds. */
+:root[data-theme="light"] .dash-panel {
+  background: linear-gradient(145deg, #ffffff, #f7f9fc);
+  border-color: var(--border);
+}
+:root[data-theme="light"] .stat-box { background: #f7f9fc; border-color: var(--border); }
+/* Use background-image, not the shorthand — the shorthand resets background-clip:text
+   and the gradient would paint a solid block over the digits. */
+:root[data-theme="light"] .stat-val {
+  background-image: linear-gradient(135deg, #1b2333, #55637a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+:root[data-theme="light"] .navbar { background: rgba(255,255,255,0.88); }
+:root[data-theme="light"] .cat-tab:hover { background: var(--card-hover); }
+:root[data-theme="light"] .search-dropdown { box-shadow: 0 12px 32px rgba(20,25,36,0.14); }
+:root[data-theme="light"] .status-menu { box-shadow: 0 12px 32px rgba(20,25,36,0.18); }
+:root[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(20,25,36,0.14); }
+:root[data-theme="light"] .media-card:hover { box-shadow: 0 12px 32px rgba(20,25,36,0.14); }
+:root[data-theme="light"] .modal-overlay { background: rgba(20,25,36,0.45); }
+:root[data-theme="light"] .modal-card { box-shadow: 0 24px 60px rgba(20,25,36,0.22); }
+:root[data-theme="light"] #loading-overlay { background: rgba(244,246,250,0.9); }
+:root[data-theme="light"] .card-badge { background: rgba(20,25,36,0.78); }
+:root[data-theme="light"] .upcoming-item { background: #f7f9fc; border-color: var(--border); }
+:root[data-theme="light"] .upcoming-item:hover { background: var(--card-hover); }
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
