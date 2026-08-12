@@ -38,7 +38,45 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // the retries are exhausted so callers can degrade instead of throwing.
 const FETCH_TIMEOUT_MS = 15000;
 
+// ── Circuit breaker ──────────────────────────────────────────────
+// When a host is having an outage (MyAnimeList goes down regularly, taking Jikan with
+// it) there is no point retrying it for every one of ten recommendations. After a few
+// consecutive failures we stop calling that host for a while and let callers fall
+// straight through to their alternatives.
+const BREAKER_THRESHOLD = 3;
+const BREAKER_COOLDOWN_MS = 90 * 1000;
+const breakers = new Map();
+
+function hostOf(url) {
+    try { return new URL(url, window.location.origin).host; } catch { return url; }
+}
+
+function breakerOpen(host) {
+    const b = breakers.get(host);
+    if (!b || b.failures < BREAKER_THRESHOLD) return false;
+    if (Date.now() - b.openedAt > BREAKER_COOLDOWN_MS) { breakers.delete(host); return false; }
+    return true;
+}
+
+function recordFailure(host) {
+    const b = breakers.get(host) || { failures: 0, openedAt: 0 };
+    b.failures++;
+    if (b.failures >= BREAKER_THRESHOLD && !b.openedAt) {
+        b.openedAt = Date.now();
+        console.warn(`[fetch] pausing requests to ${host} for ${BREAKER_COOLDOWN_MS / 1000}s after ${b.failures} failures`);
+    }
+    breakers.set(host, b);
+}
+
+function recordSuccess(host) { breakers.delete(host); }
+
+export function resetCircuitBreakers() { breakers.clear(); }
+
 export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600, headers, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
+    const host = hostOf(url);
+    // Host is known-bad right now: fail instantly instead of burning another timeout.
+    if (breakerOpen(host)) return null;
+
     let delay = baseDelay;
     for (let attempt = 0; ; attempt++) {
         // Every request needs its own deadline. Without one a stalled connection hangs
@@ -59,12 +97,14 @@ export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600
             if (data && typeof data.status === 'number' && data.status >= 400) {
                 throw new Error(`upstream ${data.status}`);
             }
+            recordSuccess(host);
             return data;
         } catch (err) {
             // Our own deadline fired: treat it as a retryable failure, not a real abort.
             const timedOut = err.name === 'AbortError' && !signal?.aborted;
             if (err.name === 'AbortError' && signal?.aborted) throw err;
             if (attempt >= retries) {
+                recordFailure(host);
                 console.warn(`[fetch] gave up on ${url}: ${timedOut ? `timed out after ${timeoutMs}ms` : err.message}`);
                 return null;
             }

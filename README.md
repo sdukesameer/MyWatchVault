@@ -85,6 +85,31 @@ This project uses a **Server-Side API Proxy** pattern.
 - In **local development only**, the app falls back to direct API calls using the keys you put in `js/env.js`. That file is gitignored.
 - `build-env.js` deliberately writes an **empty** `js/env.js` during the Netlify build. `js/env.js` is served to the browser, so any key written there would be readable by every visitor. Real keys stay in the Netlify environment and are only read server-side by the proxy functions. The browser never falls back to direct keyed calls in production.
 
+## Getting the AI working
+
+The app tries several providers in order and uses the first that answers. If you see
+"AI unavailable", check the Netlify **function logs** — the proxy names the exact failure
+for each provider.
+
+Common causes:
+- **Gemini 403** — the key is invalid, restricted, or belongs to a project without the
+  *Generative Language API* enabled. Create a fresh key at
+  [aistudio.google.com/apikey](https://aistudio.google.com/apikey), choose a project, and
+  leave the key unrestricted while testing. Paste it into `GEMINI_API_KEY` and redeploy
+  (env-var changes need a redeploy to reach the functions).
+- **Groq 429** — free-tier rate limit. It clears on its own after a minute.
+- **404 from a provider** — that model was retired. Model IDs move around on free tiers.
+
+To try a different provider first, set `AI_PROVIDER_ORDER` in Netlify, e.g.:
+
+```
+AI_PROVIDER_ORDER = groq,gemini,cohere,openrouter
+```
+
+Providers with no key configured are skipped instantly rather than timing out, so you can
+run with a single key. Groq is usually the fastest free option; Gemini has the most
+generous free quota.
+
 ## Free API Keys
 You can run this project completely for free by getting keys here:
 - [Google Gemini API](https://aistudio.google.com/apikey)

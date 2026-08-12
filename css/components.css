@@ -726,6 +726,7 @@ body.read-only #select-mode-btn { display: none; }
 }
 
 .dash-panel {
+  container-type: inline-size;   /* lets the contents react to the panel, not the page */
   background: linear-gradient(145deg, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.4));
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: var(--r-lg);
@@ -828,13 +829,19 @@ body.read-only #select-mode-btn { display: none; }
 }
 .upcoming-item {
   display: flex; align-items: center; gap: 12px; padding: 10px;
+  min-width: 0;
   background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid rgba(255,255,255,0.03);
   cursor: pointer; transition: var(--transition);
 }
 .upcoming-item:hover { background: rgba(255,255,255,0.05); }
 .upcoming-poster { width: 36px; height: 50px; object-fit: cover; border-radius: 4px; }
-.upcoming-info { flex: 1; overflow: hidden; }
-.upcoming-title { font-size: 13px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.upcoming-info { flex: 1; min-width: 0; }
+.upcoming-title {
+  font-size: 13px; font-weight: 600; line-height: 1.35;
+  /* Wrap to at most two lines rather than clipping a long title mid-word. */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere;
+}
 .upcoming-meta { font-size: 11px; color: var(--accent3); margin-top: 4px; font-weight: 600; }
 
 /* Stats Grid */
@@ -852,6 +859,19 @@ body.read-only #select-mode-btn { display: none; }
 }
 .stat-lbl {
   font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; font-weight: 600;
+  text-align: center; line-height: 1.3;
+}
+
+/* The stats column is only 20% wide on desktop, so scale its contents to the panel
+   rather than to the viewport. */
+@container (max-width: 260px) {
+  .stats-grid { gap: 8px; }
+  .stat-box { padding: 12px 8px; }
+  .stat-val { font-size: 24px; }
+  .stat-lbl { font-size: 10px; letter-spacing: 0.03em; }
+}
+@container (max-width: 190px) {
+  .stats-grid { grid-template-columns: 1fr; }
 }
 
 /* ── Touch-friendly form controls ──────────────────────────────────

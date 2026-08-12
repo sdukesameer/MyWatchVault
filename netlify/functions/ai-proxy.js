@@ -38,7 +38,7 @@ exports.handler = async (event, context) => {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const cohereKey = process.env.COHERE_API_KEY;
 
-    const PROVIDER_TIMEOUT_MS = 5000;
+    const PROVIDER_TIMEOUT_MS = 12000;
     const withTimeout = (promise, ms, name) =>
         Promise.race([
             promise,
@@ -181,19 +181,38 @@ exports.handler = async (event, context) => {
     }
 
     const providers = [
-        { name: 'Gemini 2.5 Flash', fn: gemini25Flash },
-        { name: 'Gemini 2.5 Flash Lite', fn: gemini25FlashLite },
-        { name: 'Groq Llama 3.3 70B', fn: groq33Versatile },
-        { name: 'Groq Llama 3.1 8B', fn: groq31Instant },
-        { name: 'OpenRouter Gemma 4 31B Free', fn: openrouterFree },
-        { name: 'Cohere Command R', fn: cohereCommandR },
+        { name: 'Gemini 2.5 Flash', fn: gemini25Flash, needs: () => !!geminiKey },
+        { name: 'Gemini 2.5 Flash Lite', fn: gemini25FlashLite, needs: () => !!geminiKey },
+        { name: 'Groq Llama 3.3 70B', fn: groq33Versatile, needs: () => !!groqKey },
+        { name: 'Groq Llama 3.1 8B', fn: groq31Instant, needs: () => !!groqKey },
+        { name: 'OpenRouter Gemma 4 31B Free', fn: openrouterFree, needs: () => !!openrouterKey },
+        { name: 'Cohere Command R', fn: cohereCommandR, needs: () => !!cohereKey },
     ];
+
+    // Optional AI_PROVIDER_ORDER env var lets you promote whichever free tier is
+    // actually working today (e.g. "groq,gemini,cohere") without a code change.
+    const orderPref = String(process.env.AI_PROVIDER_ORDER || '')
+        .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+    const rank = (name) => {
+        const n = name.toLowerCase();
+        const i = orderPref.findIndex(pref => n.includes(pref));
+        return i === -1 ? orderPref.length + 1 : i;
+    };
+    const ordered = orderPref.length
+        ? [...providers].sort((a, b) => rank(a.name) - rank(b.name))
+        : providers;
 
     let text = null;
     let providerUsed = null;
     let errorDetails = [];
 
-    for (const provider of providers) {
+    for (const provider of ordered) {
+        // No key configured for this provider: skip without spending a timeout on it.
+        if (provider.needs && !provider.needs()) {
+            errorDetails.push(`${provider.name}: no API key configured`);
+            continue;
+        }
         try {
             text = await withTimeout(provider.fn(prompt), PROVIDER_TIMEOUT_MS, provider.name);
             if (text) {

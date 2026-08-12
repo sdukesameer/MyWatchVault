@@ -898,22 +898,27 @@ async function handleRunSync() {
 }
 
 // ── Reco Handler ────────────────────────────────────────────────
+const RECO_TIMEOUT_MS = 45000;
 let allRecosLoaded = [];
 let recoCallback = null;
 async function handleFetchRecos(append = false) {
     try {
         showLoading(append ? 'Loading more...' : 'Finding recommendations…', 'AI is analysing your taste profile');
-        const timeout = setTimeout(() => {
-            hideLoading();
-            showToast('Recommendations took too long', 'error');
-        }, 30000); // 30s safety timeout for slow LLMs
+        // A real deadline rather than a cosmetic one: the old timer only showed a
+        // message while the request kept running, so you got two errors for one failure.
+        const deadline = new Promise((_, reject) => setTimeout(
+            () => reject(new Error('The AI took too long to respond. Try again in a moment.')),
+            RECO_TIMEOUT_MS));
         
         const excludeTitles = append ? allRecosLoaded.map(r => r.title) : [];
         excludeTitles.push(...state.library.map(m => m.title));
         const batchSize = append ? 5 : (prefs.recoBatch || 10);
-        const recos = await fetchRecommendations(state.library, state.config, excludeTitles, (msg) => {
-            showLoading(append ? 'Loading more...' : 'Finding recommendations…', msg);
-        }, batchSize);
+        const recos = await Promise.race([
+            fetchRecommendations(state.library, state.config, excludeTitles, (msg) => {
+                showLoading(append ? 'Loading more...' : 'Finding recommendations…', msg);
+            }, batchSize),
+            deadline
+        ]);
         
         if (append) {
             allRecosLoaded = [...allRecosLoaded, ...recos];
@@ -921,9 +926,8 @@ async function handleFetchRecos(append = false) {
             allRecosLoaded = recos;
         }
 
-        clearTimeout(timeout);
         hideLoading();
-        showToast(`Found recos! (via ${getLastProvider()})`, 'success');
+        showToast(`Found recos! (via ${getLastProvider() || 'AI'})`, 'success');
 
         recoCallback = async (item) => {
             showLoading('Fetching details...');
@@ -959,7 +963,7 @@ async function handleFetchRecos(append = false) {
         drawRecos();
     } catch (err) {
         hideLoading();
-        showToast('Recommendations failed: ' + err.message, 'error');
+        showToast(err.message, 'error', null, null, 7000);
     }
 }
 
