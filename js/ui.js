@@ -302,7 +302,10 @@ function renderRatingStars(rating) {
 export function renderSeasons(seasons) {
     const grid = document.getElementById('seasons-grid');
     grid.innerHTML = '';
-    seasons.forEach((s, idx) => {
+    // Season numbers are stable identifiers, not positions — display them in order but never renumber.
+    const ordered = [...seasons].sort((a, b) => (a.number || 0) - (b.number || 0));
+    ordered.forEach((s, idx) => {
+        const number = parseInt(s.number) || idx + 1;
         const watched = parseInt(s.watched) || 0;
         const total = parseInt(s.total) || 0;
         let statusClass = 'not-started', statusLabel = 'Not started';
@@ -311,9 +314,9 @@ export function renderSeasons(seasons) {
 
         const row = document.createElement('div');
         row.className = 'season-row';
-        row.dataset.idx = idx;
+        row.dataset.number = number;
         row.innerHTML = `
-            <div class="season-label">Season ${s.number || idx + 1}</div>
+            <div class="season-label">Season ${number}</div>
             <div class="season-ep-track">
                 <input class="ep-input" type="number" min="0" value="${watched}" placeholder="0" title="Watched episodes">
                 <span class="ep-sep">/ </span>
@@ -345,10 +348,24 @@ export function renderSeasons(seasons) {
         });
         
         row.querySelector('.season-delete').addEventListener('click', () => {
-            row.remove();
+            // Re-render from the remaining rows so the labels can never drift from the data.
+            renderSeasons(collectSeasonRows().filter(s => s.number !== number));
+            updateOverallStatusFromSeasons();
         });
 
         grid.appendChild(row);
+    });
+}
+
+// Reads the tracker rows back out, keeping each row's real season number.
+export function collectSeasonRows() {
+    return Array.from(document.querySelectorAll('#seasons-grid .season-row')).map((row, idx) => {
+        const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
+        return {
+            number: parseInt(row.dataset.number) || idx + 1,
+            watched: parseInt(watchedInp.value) || 0,
+            total: parseInt(totalInp.value) || 0
+        };
     });
 }
 
@@ -423,14 +440,7 @@ export function collectDetailData() {
         tags: tags,
         rating: parseInt(document.getElementById('detail-rating').dataset.value) || 0,
         rewatchCount: parseInt(rewatchText) || 0,
-        seasons: Array.from(document.querySelectorAll('#seasons-grid .season-row')).map((row, idx) => {
-            const [watchedInp, totalInp] = row.querySelectorAll('.ep-input');
-            return {
-                number: idx + 1,
-                watched: parseInt(watchedInp.value) || 0,
-                total: parseInt(totalInp.value) || 0
-            };
-        })
+        seasons: collectSeasonRows()
     };
 }
 

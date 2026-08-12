@@ -6,6 +6,22 @@ import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './constants.js';
 import { escapeHTML, showToast } from './utils.js';
 import { loadSyncMeta, normalizeTitle } from './library.js';
 
+// Adds any season numbers up to `latest` that aren't tracked yet. Keyed on the season
+// number rather than array length, so gaps never produce duplicate entries.
+function ensureSeasonsUpTo(media, latest) {
+    if (!latest || typeof latest !== 'number') return;
+    if (!Array.isArray(media.seasons)) media.seasons = [];
+    for (let n = 1; n <= latest; n++) {
+        if (!media.seasons.some(s => Number(s.number) === n)) {
+            media.seasons.push({ number: n, watched: 0, total: 0 });
+        }
+    }
+    media.seasons.sort((a, b) => (a.number || 0) - (b.number || 0));
+}
+
+const watchedTotal = seasons =>
+    (seasons || []).reduce((acc, s) => acc + (parseInt(s.watched) || 0), 0);
+
 export async function runSync(library, config, onProgress) {
     if (!library.length) throw new Error('Add some titles first!');
     
@@ -30,7 +46,7 @@ export async function runSync(library, config, onProgress) {
                     if (media.seasons.length > 0 && result.latestEpisodes) {
                         media.seasons[0].total = result.latestEpisodes;
                     }
-                    const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
+                    const totalWatched = watchedTotal(media.seasons);
                     if (result.latestEpisodes && totalWatched >= result.latestEpisodes) result.upToDate = true;
                     if (res.data.status === 'Finished Airing' && totalWatched >= result.latestEpisodes) result.upToDate = true;
                 }
@@ -62,7 +78,7 @@ export async function runSync(library, config, onProgress) {
                             }
                         });
                         
-                        const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
+                        const totalWatched = watchedTotal(media.seasons);
                         if (totalAvailableEpisodes > 0 && totalWatched >= totalAvailableEpisodes) {
                             result.upToDate = true;
                         }
@@ -92,13 +108,9 @@ export async function runSync(library, config, onProgress) {
                             upToDate: false
                         };
                         
-                        if (res.number_of_seasons > media.seasons.length) {
-                            while(media.seasons.length < res.number_of_seasons) {
-                                media.seasons.push({ number: media.seasons.length + 1, watched: 0, total: 0 });
-                            }
-                        }
-                        
-                        const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
+                        ensureSeasonsUpTo(media, res.number_of_seasons);
+
+                        const totalWatched = watchedTotal(media.seasons);
                         if (res.number_of_episodes && totalWatched >= res.number_of_episodes) {
                             result.upToDate = true;
                         }
@@ -116,11 +128,7 @@ export async function runSync(library, config, onProgress) {
                 }
                 
                 if (media.category.includes('series')) {
-                    if (result.latestSeason && typeof result.latestSeason === 'number') {
-                        while (media.seasons.length < result.latestSeason) {
-                            media.seasons.push({ number: media.seasons.length + 1, watched: 0, total: 0 });
-                        }
-                    }
+                    ensureSeasonsUpTo(media, result.latestSeason);
                 }
             }
         } catch (e) {

@@ -510,10 +510,10 @@ function bindEvents() {
     document.getElementById('detail-modal').addEventListener('click', e => { if (e.target === e.currentTarget) handleDetailClose(); });
 
     document.getElementById('add-season-btn').addEventListener('click', () => {
-        const grid = document.getElementById('seasons-grid');
-        const existing = grid.querySelectorAll('.season-row').length;
         const seasons = ui.collectDetailData().seasons;
-        seasons.push({ number: existing + 1, watched: 0, total: 0 });
+        // Continue from the highest existing season number, not the row count.
+        const nextNumber = seasons.reduce((max, s) => Math.max(max, s.number || 0), 0) + 1;
+        seasons.push({ number: nextNumber, watched: 0, total: 0 });
         ui.renderSeasons(seasons);
     });
 
@@ -570,8 +570,8 @@ function bindEvents() {
 
                 // Update sync results if not a preview
                 if (!data.id.startsWith('preview_')) {
-                    const totalWatched = media.seasons.reduce((acc, s) => acc + s.watched, 0);
-                    const totalEpisodes = media.seasons.reduce((acc, s) => acc + s.total, 0);
+                    const totalWatched = media.seasons.reduce((acc, s) => acc + (parseInt(s.watched) || 0), 0);
+                    const totalEpisodes = media.seasons.reduce((acc, s) => acc + (parseInt(s.total) || 0), 0);
                     const upToDate = totalEpisodes > 0 && totalWatched >= totalEpisodes;
                     state.syncResults[media.id] = {
                         latestSeason: media.seasons.length,
