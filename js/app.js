@@ -4,12 +4,12 @@
 import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
-import { fetchRecommendations, renderRecommendations } from './recommendations.js';
-import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount } from './api.js';
-import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility } from './utils.js';
+import { fetchRecommendations, renderRecommendations, enhanceRecommendation, updateRecommendationCard } from './recommendations.js';
+import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback } from './api.js';
+import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility, debounce } from './utils.js';
 import { setupSearch } from './search.js';
 import { getStats, getDashboardItems } from './dashboard.js';
-import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './constants.js';
+import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, normalizeTags, isSeriesCategory } from './constants.js';
 
 const state = {
     library: [],
@@ -20,6 +20,7 @@ const state = {
     filterStatus: 'all',
     filterGenre: 'all',
     filterRating: 'all',
+    libraryQuery: '',
     searchCache: new Map(),
     previewItem: null
 };
@@ -176,7 +177,36 @@ const openDetail = (mediaOrId) => {
         render(); // Clear badge immediately
     }
     ui.openDetailModal(media);
+    loadSimilarFor(media);
 };
+
+// "More Like This" — populated after the modal opens so it never delays it.
+let similarToken = 0;
+async function loadSimilarFor(media) {
+    const token = ++similarToken;
+    ui.renderSimilar([], { loading: true });
+
+    const similar = await fetchSimilarTitles(media, state.config).catch(() => []);
+    if (token !== similarToken) return; // a different item was opened meanwhile
+
+    ui.renderSimilar(similar, {
+        ownedTitles: new Set(state.library.map(m => lib.normalizeTitle(m.title))),
+        onAdd: async (item) => {
+            const dupe = state.library.some(m => lib.normalizeTitle(m.title) === lib.normalizeTitle(item.title));
+            if (dupe) return true;
+            try {
+                const seasons = await fetchDeepDetails(item);
+                const added = lib.addMedia(state.library, { ...item, seasons });
+                showToast(`"${added.title}" added to vault ✓`, 'success');
+                render();
+                return true;
+            } catch (e) {
+                showToast(`Couldn't add "${item.title}"`, 'error');
+                return false;
+            }
+        }
+    });
+}
 
 function render() {
     const stats = getStats(state.library);
@@ -198,8 +228,10 @@ function render() {
 
     ui.renderDashboardWidgets(continueItem, upcoming, openDetail);
     
-    const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy);
-    ui.renderGrid(filtered, state.syncResults, state.currentCat, openDetail);
+    const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy, state.libraryQuery);
+    const isFiltered = Boolean(state.libraryQuery) || state.filterStatus !== 'all'
+        || state.filterGenre !== 'all' || state.filterRating !== 'all';
+    ui.renderGrid(filtered, state.syncResults, state.currentCat, openDetail, isFiltered && state.library.length > 0);
     
     // Re-render recommendations if they are loaded so that "✓ In Vault" updates
     if (allRecosLoaded.length > 0 && recoCallback) {
@@ -207,15 +239,41 @@ function render() {
     }
 }
 
-// ── Search & Unsplash (Posters) ─────────────────────────────────
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+// ── Search cache ────────────────────────────────────────────────
+// Persisted so repeat lookups stay instant across reloads, and so a flaky upstream
+// (Jikan 504s) doesn't wipe out results you already fetched once.
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CACHE_LIMIT = 100;
+const SEARCH_CACHE_KEY = 'watchvault_search_cache';
+
+function loadSearchCache() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(SEARCH_CACHE_KEY) || '[]');
+        if (!Array.isArray(raw)) return;
+        const now = Date.now();
+        raw.forEach(([q, entry]) => {
+            if (entry && now - entry.timestamp < CACHE_TTL_MS) state.searchCache.set(q, entry);
+        });
+    } catch { /* corrupt cache is not worth recovering */ }
+}
+
+function persistSearchCache() {
+    try {
+        localStorage.setItem(SEARCH_CACHE_KEY, JSON.stringify([...state.searchCache]));
+    } catch {
+        // Quota exceeded — the cache is disposable, so drop it rather than fail.
+        try { localStorage.removeItem(SEARCH_CACHE_KEY); } catch {}
+    }
+}
 
 function getCachedSearch(query) {
     const q = query.toLowerCase();
     if (state.searchCache.has(q)) {
         const entry = state.searchCache.get(q);
         if (Date.now() - entry.timestamp < CACHE_TTL_MS) {
+            // Refresh recency so popular searches survive the LRU trim.
+            state.searchCache.delete(q);
+            state.searchCache.set(q, entry);
             return entry.results;
         }
         state.searchCache.delete(q);
@@ -226,12 +284,31 @@ function getCachedSearch(query) {
 function setCachedSearch(query, results) {
     const q = query.toLowerCase();
     state.searchCache.set(q, { results, timestamp: Date.now() });
-    if (state.searchCache.size > CACHE_LIMIT) {
-        const oldestKey = state.searchCache.keys().next().value;
-        state.searchCache.delete(oldestKey);
+    while (state.searchCache.size > CACHE_LIMIT) {
+        state.searchCache.delete(state.searchCache.keys().next().value);
     }
+    persistSearchCache();
 }
 
+
+// ── Poster backfill ─────────────────────────────────────────────
+// Older entries (and anything added while an upstream was down) can be missing artwork.
+// Fill those in from the keyless sources, a few per session so we never hammer them.
+const POSTER_BACKFILL_LIMIT = 8;
+async function backfillPosters() {
+    const missing = state.library.filter(m => !m.poster && !m.posterTried).slice(0, POSTER_BACKFILL_LIMIT);
+    if (!missing.length) return;
+
+    let found = 0;
+    for (const media of missing) {
+        const poster = await findPosterFallback(media).catch(() => null);
+        // Mark it either way so a title with no art isn't retried every session.
+        const updates = { posterTried: true };
+        if (poster) { updates.poster = poster; found++; }
+        lib.updateMedia(state.library, media.id, updates);
+    }
+    if (found) render();
+}
 
 // ── Sync Handler ────────────────────────────────────────────────
 async function handleRunSync() {
@@ -285,11 +362,11 @@ async function handleFetchRecos(append = false) {
         } else {
             allRecosLoaded = recos;
         }
-        
+
         clearTimeout(timeout);
         hideLoading();
         showToast(`Found recos! (via ${getLastProvider()})`, 'success');
-        
+
         recoCallback = async (item) => {
             showLoading('Fetching details...');
             const detailTimeout = setTimeout(() => hideLoading(), 10000);
@@ -312,9 +389,14 @@ async function handleFetchRecos(append = false) {
             openDetail(previewItem);
         };
 
+        // Show the grid straight away, then stream artwork into each card as it resolves.
         renderRecommendations(allRecosLoaded, state.library, recoCallback, openDetail);
-        
         document.getElementById('load-more-reco-wrap').style.display = recos.length ? 'block' : 'none';
+
+        for (const item of recos) {
+            await enhanceRecommendation(item, state.config);
+            updateRecommendationCard(item);
+        }
     } catch (err) {
         hideLoading();
         showToast('Recommendations failed: ' + err.message, 'error');
@@ -369,6 +451,10 @@ function bindEvents() {
         state.filterRating = e.target.value;
         render();
     });
+    document.getElementById('library-filter').addEventListener('input', debounce((e) => {
+        state.libraryQuery = e.target.value;
+        render();
+    }, 200));
 
     // Random Picker
     document.getElementById('random-picker-btn').addEventListener('click', () => {
@@ -533,7 +619,8 @@ function bindEvents() {
         return currentData.status !== media.status || 
                currentData.category !== media.category ||
                currentData.notes !== (media.notes || '') || 
-               currentData.tags.join(',') !== (media.tags || []).join(',') ||
+               // Compare like with like: stored tags may predate the normalising rules.
+               currentData.tags.join(',') !== normalizeTags(media.tags).join(',') ||
                currentData.rating !== (media.rating || 0) ||
                currentData.rewatchCount !== (media.rewatchCount || 0) ||
                !seasonsMatch;
@@ -761,11 +848,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         ), 500);
     }
     state.syncResults = lib.loadSyncResults();
+    loadSearchCache();
 
     document.getElementById('add-year').max = new Date().getFullYear() + 5;
 
     bindEvents();
     render();
+
+    // Fill in any missing artwork quietly in the background.
+    setTimeout(() => backfillPosters(), 1200);
 
     // Daily auto-sync check
     const today = new Date().toDateString();

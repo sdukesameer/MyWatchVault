@@ -128,10 +128,18 @@ export function setupSearch(searchInput, dropdown, state, getCachedSearch, setCa
             return;
         }
 
+        // Hide titles already in the vault — this dropdown is for adding new things.
+        const owned = new Set(state.library.map(m => lib.normalizeTitle(m.title)));
+        const fresh = results.filter(item => !owned.has(lib.normalizeTitle(item.title)));
+
+        if (fresh.length === 0) {
+            dropdown.innerHTML = `<div style="padding:16px;color:var(--text-muted);text-align:center;">Everything matching “${escapeHTML(query)}” is already in your vault.</div>`;
+            return;
+        }
+
         dropdown.innerHTML = '';
-        results.forEach((item, idx) => {
-            const normItemTitle = lib.normalizeTitle(item.title);
-            const inLib = state.library.some(m => lib.normalizeTitle(m.title) === normItemTitle && m.category === item.category);
+        fresh.forEach((item, idx) => {
+            const inLib = false;
 
             const div = document.createElement('div');
             div.className = 'search-item';

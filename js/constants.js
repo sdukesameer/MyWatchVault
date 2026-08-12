@@ -9,6 +9,18 @@ export const CAT_LABELS = {
     'anime': 'Anime'
 };
 
+// Categories that track seasons/episodes ('anime' is a legacy alias for 'anime-series').
+export const SERIES_CATEGORIES = ['series', 'anime-series', 'anime'];
+export const isSeriesCategory = cat => SERIES_CATEGORIES.includes(cat);
+
+// Tags are stored as typed but compared/saved in this normalised form.
+export function normalizeTags(tags) {
+    const list = Array.isArray(tags) ? tags : String(tags || '').split(',');
+    return list
+        .map(t => String(t).trim().toLowerCase().replace(/[^a-z0-9\-]/g, ''))
+        .filter(Boolean);
+}
+
 export const CAT_EMOJI = {
     'anime-series': '⛩️',
     'anime-movie': '🎬',

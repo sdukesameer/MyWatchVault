@@ -139,12 +139,22 @@ export function removeMedia(lib, syncResults, id) {
     return false;
 }
 
-export function getFilteredLibrary(lib, cat, statusFilter, genreFilter, ratingFilter, sortBy) {
+export function getFilteredLibrary(lib, cat, statusFilter, genreFilter, ratingFilter, sortBy, textQuery = '') {
     let filtered = lib;
-    
+
     // Category filter
     if (cat !== 'all') {
         filtered = filtered.filter(m => m.category === cat);
+    }
+
+    // Free-text filter across title, tags and genre
+    const q = String(textQuery || '').trim().toLowerCase();
+    if (q) {
+        filtered = filtered.filter(m =>
+            String(m.title || '').toLowerCase().includes(q) ||
+            String(m.genre || '').toLowerCase().includes(q) ||
+            (m.tags || []).some(t => String(t).toLowerCase().includes(q))
+        );
     }
     
     // Status filter

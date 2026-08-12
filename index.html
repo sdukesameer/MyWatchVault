@@ -127,6 +127,8 @@
                 <option value="4+">★★★★+ (4+ Stars)</option>
                 <option value="3+">★★★+ (3+ Stars)</option>
             </select>
+            <input type="search" id="library-filter" class="input-field" style="width: auto; flex: 1; min-width: 160px;"
+                   placeholder="Filter your vault by title or tag…" autocomplete="off">
         </div>
 
         <!-- Add Bar -->
@@ -236,6 +238,10 @@
                 <div class="tracker-hint">Click a season's status to mark it complete — every earlier season completes with it. Click again for “In progress”.</div>
                 <div class="seasons-grid" id="seasons-grid"></div>
                 <button class="add-season-btn" id="add-season-btn">＋ Add Season</button>
+            </div>
+            <div class="similar-section" id="similar-section" style="display:none;">
+                <div class="tracker-title">More Like This</div>
+                <div class="similar-list" id="similar-list"></div>
             </div>
         </div>
         <div class="modal-footer">

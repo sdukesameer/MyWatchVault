@@ -1,8 +1,9 @@
 // js/ui.js
 // DOM Rendering functions
 
-import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, STATUS_DOT_CLASS } from './constants.js';
+import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, STATUS_DOT_CLASS, isSeriesCategory, normalizeTags } from './constants.js';
 import { escapeHTML } from './utils.js';
+import { normalizeTitle } from './library.js';
 
 let editingId = null;
 
@@ -102,15 +103,21 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
     }
 }
 
-export function renderGrid(filteredLib, syncResults, currentCat, onCardClick) {
+export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, isFiltered = false) {
     const grid = document.getElementById('media-grid');
 
     if (!filteredLib.length) {
-        grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
-            <div class="icon">${currentCat === 'all' ? '🎬' : CAT_EMOJI[currentCat]}</div>
-            <h3>Nothing here yet</h3>
-            <p>Search for a title above or click "+ Add Manually" to start building your vault.</p>
-        </div>`;
+        grid.innerHTML = isFiltered
+            ? `<div class="empty-state" style="grid-column:1/-1">
+                <div class="icon">🔍</div>
+                <h3>No matches</h3>
+                <p>Nothing in your vault matches these filters. Try clearing them.</p>
+            </div>`
+            : `<div class="empty-state" style="grid-column:1/-1">
+                <div class="icon">${currentCat === 'all' ? '🎬' : CAT_EMOJI[currentCat]}</div>
+                <h3>Nothing here yet</h3>
+                <p>Search for a title above or click "+ Add Manually" to start building your vault.</p>
+            </div>`;
         return;
     }
 
@@ -262,12 +269,11 @@ export function openDetailModal(media) {
     document.getElementById('detail-notes').value = media.notes || '';
 
     const trackerSection = document.getElementById('tracker-section');
-    if (media.category === 'series' || media.category === 'anime-series') {
-        trackerSection.style.display = 'block';
-        renderSeasons(media.seasons || []);
-    } else {
-        trackerSection.style.display = 'none';
-    }
+    const tracksSeasons = isSeriesCategory(media.category);
+    trackerSection.style.display = tracksSeasons ? 'block' : 'none';
+    // Always re-render — otherwise a hidden grid keeps the previous item's rows and
+    // collectDetailData() would save them onto this one.
+    renderSeasons(tracksSeasons ? (media.seasons || []) : []);
 
     openModal('detail-modal');
 }
@@ -436,6 +442,61 @@ function cycleSeasonState(row) {
     updateOverallStatusFromSeasons();
 }
 
+export function renderSimilar(items, { loading = false, onAdd, ownedTitles = new Set() } = {}) {
+    const section = document.getElementById('similar-section');
+    const list = document.getElementById('similar-list');
+    if (!section || !list) return;
+
+    section.style.display = 'block';
+
+    if (loading) {
+        list.innerHTML = Array.from({ length: 4 },
+            () => `<div class="similar-card skeleton" style="height:200px;"></div>`).join('');
+        return;
+    }
+
+    if (!items.length) {
+        list.innerHTML = `<div class="similar-empty">No suggestions available right now.</div>`;
+        return;
+    }
+
+    list.innerHTML = '';
+    items.forEach(item => {
+        const owned = ownedTitles.has(normalizeTitle(item.title));
+        const card = document.createElement('div');
+        card.className = 'similar-card';
+        const poster = item.poster
+            ? `<img class="similar-poster" src="${escapeHTML(item.poster)}" alt="" loading="lazy"
+                    onerror="this.outerHTML='<div class=&quot;similar-poster&quot;>${CAT_EMOJI[item.category] || '🎬'}</div>'">`
+            : `<div class="similar-poster">${CAT_EMOJI[item.category] || '🎬'}</div>`;
+
+        card.innerHTML = `
+            ${poster}
+            <div class="similar-body">
+                <div class="similar-title" title="${escapeHTML(item.title)}">${escapeHTML(item.title)}</div>
+                <div class="similar-meta">${escapeHTML(CAT_LABELS[item.category] || '')}${item.year ? ' · ' + escapeHTML(String(item.year)) : ''}</div>
+                <button class="similar-add" ${owned ? 'disabled' : ''}>${owned ? '✓ In Vault' : '+ Add'}</button>
+            </div>`;
+
+        if (!owned) {
+            const btn = card.querySelector('.similar-add');
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = 'Adding…';
+                const ok = await onAdd?.(item);
+                btn.textContent = ok ? '✓ In Vault' : '+ Add';
+                btn.disabled = Boolean(ok);
+            });
+        }
+        list.appendChild(card);
+    });
+}
+
+export function hideSimilar() {
+    const section = document.getElementById('similar-section');
+    if (section) section.style.display = 'none';
+}
+
 // Sets every season to complete — used when the item itself is marked completed.
 export function markAllSeasonsComplete() {
     document.querySelectorAll('#seasons-grid .season-row').forEach(markRowComplete);
@@ -501,8 +562,7 @@ function updateOverallStatusFromSeasons() {
 }
 
 export function collectDetailData() {
-    const rawTags = document.getElementById('detail-tags').value;
-    const tags = rawTags.split(',').map(t => t.trim().toLowerCase().replace(/[^a-z0-9\-]/g, '')).filter(t => t.length > 0);
+    const tags = normalizeTags(document.getElementById('detail-tags').value);
     const rewatchText = document.getElementById('rewatch-count').textContent;
 
     return {

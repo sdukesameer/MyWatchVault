@@ -42,6 +42,10 @@ exports.handler = async (event, context) => {
         url = `https://api.themoviedb.org/3/tv/${tvId}?api_key=${tmdbKey}`;
     } else if (endpoint === 'movie-details' && tvId) {
         url = `https://api.themoviedb.org/3/movie/${tvId}?api_key=${tmdbKey}`;
+    } else if (endpoint === 'tv-similar' && tvId) {
+        url = `https://api.themoviedb.org/3/tv/${tvId}/recommendations?api_key=${tmdbKey}`;
+    } else if (endpoint === 'movie-similar' && tvId) {
+        url = `https://api.themoviedb.org/3/movie/${tvId}/recommendations?api_key=${tmdbKey}`;
     } else {
         return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Invalid endpoint or parameters' }) };
     }
