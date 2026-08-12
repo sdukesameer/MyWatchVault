@@ -283,3 +283,14 @@ select.input-field {
   .nav-actions .btn-label { display: none; }
   .nav-actions .btn-sm { padding: 7px 10px; font-size: 15px; }
 }
+
+/* Very narrow phones (iPhone SE): keep the logo mark and drop the wordmark so the
+   four action buttons still fit without the page scrolling sideways. */
+@media (max-width: 400px) {
+  .navbar { padding: 0 10px; gap: 6px; }
+  .nav-brand { font-size: 0; gap: 0; }
+  .nav-brand .logo-icon { font-size: 22px; }
+  .nav-actions { gap: 4px; }
+  .nav-actions .btn-sm { padding: 6px 8px; font-size: 14px; }
+  .nav-actions .btn-icon { width: 32px; height: 32px; font-size: 14px; }
+}

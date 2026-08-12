@@ -478,7 +478,7 @@ function refreshCloudUI() {
             ? 'Changes save to the cloud automatically.'
             : 'Latest cloud data is pulled automatically when you open the app.';
     }
-    document.getElementById('cloud-actions').style.display = editor ? 'flex' : 'none';
+    document.getElementById('cloud-logout-btn').style.display = editor ? 'inline-flex' : 'none';
 
     applyEditPermissions();
 }
@@ -497,6 +497,18 @@ async function pullFromCloud({ silent = false } = {}) {
     try {
         const data = await cloud.pull();
         if (!Array.isArray(data.library)) throw new Error('Malformed cloud data');
+
+        // A brand-new (empty) database must not wipe a vault that only exists locally —
+        // seed the cloud from this device instead.
+        if (data.library.length === 0 && state.library.length > 0) {
+            if (cloud.isEditor()) {
+                await cloud.push(state.library, lib.loadSyncMeta()).catch(() => {});
+                if (!silent) showToast('Cloud was empty — uploaded this device\'s vault ✓', 'success');
+            } else if (!silent) {
+                showToast('Cloud vault is empty; keeping your local titles', 'info');
+            }
+            return true;
+        }
 
         // Keep any artwork we already resolved locally — the cloud copy has none.
         const localPosters = new Map(state.library.map(m => [m.id, { poster: m.poster, posterTried: m.posterTried }]));
@@ -1386,9 +1398,12 @@ function bindEvents() {
             return;
         }
 
+        const cloudSynced = cloud.isCloudEnabled() && cloud.isEditor();
         ui.renderConfirmModal(
             'Clear All Data',
-            `This will permanently delete all ${state.library.length} titles and their watch progress. Export a backup first if you want to keep them.`,
+            `This will permanently delete all ${state.library.length} titles and their watch progress`
+            + (cloudSynced ? ' — from this device and from the cloud database.' : '.')
+            + ' Export a CSV first if you want to keep them.',
             'Delete Everything',
             () => {
                 const clonedLib = JSON.parse(JSON.stringify(state.library));
@@ -1399,6 +1414,8 @@ function bindEvents() {
                 state.syncResults = res.syncResults;
                 ui.closeModal('settings-modal');
                 render();
+                // Clear the cloud copy too, otherwise the next open pulls it all back.
+                syncUp();
 
                 showToast('All data cleared', 'info', 'Undo', () => {
                     state.library = clonedLib;
@@ -1406,6 +1423,7 @@ function bindEvents() {
                     lib.saveLibrary(state.library);
                     lib.saveSyncResults(state.syncResults);
                     render();
+                    syncUp();
                     showToast('Data restored', 'success');
                 }, 8000);
             }

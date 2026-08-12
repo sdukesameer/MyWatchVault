@@ -87,14 +87,10 @@
                         <div class="stat-lbl">Episodes</div>
                     </div>
                     <div class="stat-box">
-                        <div class="stat-val" id="stat-avg-rating">0.0★</div>
-                        <div class="stat-lbl">Your Avg Rating</div>
-                    </div>
-                    <div class="stat-box">
                         <div class="stat-val" id="stat-global-rating">0.0</div>
                         <div class="stat-lbl">Global Avg 🌐</div>
                     </div>
-                    <div class="stat-box" style="grid-column:1/-1;">
+                    <div class="stat-box">
                         <div class="stat-val" id="stat-fav-genre">-</div>
                         <div class="stat-lbl">Top Genre</div>
                     </div>
@@ -377,14 +373,14 @@
             <!-- Cloud sync (Turso) — hidden unless the serverless function reports it's configured -->
             <div id="cloud-section" style="display:none;">
                 <div class="field-label">Cloud Sync</div>
-                <div class="cloud-status" id="cloud-status">Checking…</div>
+                <div class="cloud-status-row">
+                    <div class="cloud-status" id="cloud-status">Checking…</div>
+                    <button class="btn btn-secondary btn-sm" id="cloud-logout-btn" style="display:none;">🔒 Lock editing</button>
+                </div>
                 <div id="cloud-login-row" style="display:flex;gap:8px;margin-top:10px;">
                     <input type="password" id="cloud-passcode" class="input-field" placeholder="Admin passcode"
                            autocomplete="current-password" style="flex:1;">
                     <button class="btn btn-primary btn-sm" id="cloud-login-btn">Unlock</button>
-                </div>
-                <div id="cloud-actions" style="display:none;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                    <button class="btn btn-ghost btn-sm" id="cloud-logout-btn">Lock editing</button>
                 </div>
                 <div class="cloud-status" id="cloud-sync-state" style="margin-top:8px;"></div>
             </div>

@@ -10,12 +10,11 @@ let editingId = null;
 export function renderStats(stats) {
     const elHours = document.getElementById('stat-hours');
     const elEp = document.getElementById('stat-episodes');
-    const elRating = document.getElementById('stat-avg-rating');
+
     const elGenre = document.getElementById('stat-fav-genre');
     
     if (elHours) elHours.textContent = stats.hoursWatched || 0;
     if (elEp) elEp.textContent = stats.totalEpisodes || 0;
-    if (elRating) elRating.textContent = `${stats.avgRating || '0.0'}★`;
     const elGlobal = document.getElementById('stat-global-rating');
     if (elGlobal) elGlobal.textContent = stats.avgGlobalRating || '0.0';
     if (elGenre) elGenre.textContent = stats.topGenre || '-';

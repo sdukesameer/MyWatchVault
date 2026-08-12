@@ -11,24 +11,49 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 
 export async function fetchRecommendations(library, config, excludeTitles = [], onProgress = null, count = 10) {
     if (library.length < 2) {
-        throw new Error('Add more titles for better recommendations!');
+        throw new Error('Add and rate a couple of titles first — ratings drive the suggestions.');
     }
 
-    const liked = library
-        .filter(m => m.rating >= 4 || m.status === 'completed')
+    // The user's own star ratings are the strongest taste signal available, so they lead
+    // the prompt — loved titles first, then liked, and disliked ones as negative signal.
+    const byRating = n => library.filter(m => m.rating === n).map(m => m.title);
+    const loved = byRating(5);
+    const liked = byRating(4);
+    const disliked = [...byRating(1), ...byRating(2)];
+    const completedUnrated = library
+        .filter(m => m.status === 'completed' && !m.rating)
         .map(m => m.title)
-        .slice(0, 15)
-        .join(', ');
+        .slice(0, 10);
+
+    // Genres of the highest-rated titles, which is what "more like this" really means.
+    const lovedGenres = [...new Set(
+        library.filter(m => m.rating >= 4)
+            .flatMap(m => String(m.genre || '').split(',').map(g => g.trim()))
+            .filter(Boolean)
+    )].slice(0, 8);
 
     const allTitles = [...library.map(m => m.title), ...excludeTitles].join(', ');
     const cats = [...new Set(library.map(m => m.category))].join(', ');
 
-    const prompt = `You are a media recommendation expert. Based on this user's watch history:
-Top rated / completed: ${liked || 'none yet'}
-All tracked and previously recommended: ${allTitles}
+    const tasteLines = [
+        loved.length ? `RATED 5/5 — they LOVED these, weight them most heavily: ${loved.slice(0, 15).join(', ')}` : '',
+        liked.length ? `Rated 4/5 — strong likes: ${liked.slice(0, 15).join(', ')}` : '',
+        lovedGenres.length ? `Genres of their highest-rated titles: ${lovedGenres.join(', ')}` : '',
+        disliked.length ? `Rated 1-2/5 — AVOID anything similar to these: ${disliked.slice(0, 10).join(', ')}` : '',
+        completedUnrated.length ? `Completed but unrated (weaker signal): ${completedUnrated.join(', ')}` : ''
+    ].filter(Boolean).join('\n');
+
+    const prompt = `You are a media recommendation expert. This user's own star ratings are the
+most important signal — prioritise them far above anything else:
+
+${tasteLines || 'No ratings yet; infer taste from the tracked list.'}
+
+All tracked and previously recommended (never suggest these): ${allTitles}
 Preferred categories: ${cats}
 
 Recommend ${count} titles they would love that are NOT in their list.
+Base each pick primarily on what they rated 4-5 stars, and say so in "whyYouLikeIt"
+by naming the specific highly-rated title it resembles.
 Return JSON array:
 [{ "title": "...", "year": 2023, "category": "anime-series|anime-movie|series|movie", "genre": "...", "description": "1-2 sentences about the show", "whyYouLikeIt": "Specific reason based on their taste (1 sentence)" }]
 ONLY valid JSON array, no markdown.`;

@@ -414,6 +414,11 @@
 body.read-only .add-bar .btn-primary,
 body.read-only #select-mode-btn { display: none; }
 .cloud-status { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+.cloud-status-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.cloud-status-row .cloud-status { flex: 1; min-width: 0; }
 
 /* Status picker popup */
 .status-menu {
@@ -448,6 +453,14 @@ body.read-only #select-mode-btn { display: none; }
 }
 .bulk-count { font-size: 13px; font-weight: 600; color: var(--accent); }
 .bulk-spacer { flex: 1; }
+
+/* Keep the bulk bar to two tidy rows instead of a tall stack on phones. */
+@media (max-width: 620px) {
+  .bulk-bar { padding: 8px 10px; gap: 8px; }
+  .bulk-bar .btn { padding: 6px 9px; font-size: 11px; }
+  .bulk-count { order: -1; flex: 1 0 100%; }
+  .bulk-spacer { display: none; }
+}
 
 .media-card.selectable { cursor: pointer; }
 .media-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(232,67,147,0.35); }
@@ -725,21 +738,24 @@ body.read-only #select-mode-btn { display: none; }
 }
 
 .continue-hero {
-  position: relative; width: 100%; min-height: 240px;
+  position: relative; width: 100%; min-height: 320px; height: 100%;
   background: #000; display: flex; flex-direction: column; justify-content: flex-end;
   padding: 24px;
 }
 .continue-hero-bg {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: cover; z-index: 0; opacity: 0.4;
+  object-fit: cover; z-index: 0; opacity: 0.62;
 }
 .continue-hero-fallback {
   display: flex; align-items: center; justify-content: center;
-  background: var(--surface); font-size: 100px; opacity: 0.12;
+  background: var(--surface); opacity: 0.18;
+  /* Scale with the panel so the artwork keeps filling it on any screen. */
+  font-size: clamp(90px, 22vw, 220px);
 }
 .continue-hero-scrim {
   position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.45) 55%, transparent 100%);
+  /* Only darken the lower half so more of the poster stays visible. */
+  background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 32%, rgba(0,0,0,0.1) 62%, transparent 100%);
 }
 .continue-hero-content { position: relative; z-index: 2; }
 
@@ -770,7 +786,7 @@ body.read-only #select-mode-btn { display: none; }
 
 /* On narrow screens the button gets its own row so it never crushes the progress bar. */
 @media (max-width: 560px) {
-  .continue-hero { padding: 18px; min-height: 200px; }
+  .continue-hero { padding: 18px; min-height: 260px; }
   .continue-hero-footer { flex-direction: column; align-items: stretch; gap: 14px; }
   .continue-bar { max-width: none; }
   .continue-edit-btn { width: 100%; }
