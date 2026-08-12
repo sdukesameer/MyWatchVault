@@ -267,6 +267,19 @@ select.input-field {
   outline-offset: 2px;
 }
 
+/* iOS Safari zooms the page in whenever a focused field is smaller than 16px, and it
+   does not zoom back out afterwards. Bumping the font size on touch layouts is the only
+   reliable fix that doesn't disable pinch-zoom for everyone. */
+@media (max-width: 900px) {
+  .input-field,
+  input[type="text"], input[type="search"], input[type="password"],
+  input[type="number"], input[type="file"], select, textarea {
+    font-size: 16px;
+  }
+  .filter-bar select { font-size: 16px; }
+  .ep-input { font-size: 16px; }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .container { padding: 0 16px; }

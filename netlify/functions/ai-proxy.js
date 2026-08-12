@@ -141,7 +141,7 @@ exports.handler = async (event, context) => {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "meta-llama/llama-3.1-8b-instruct:free",
+                model: "google/gemma-4-31b-it:free",
                 messages: [
                     { role: "system", content: "You are an entertainment assistant. Always respond with valid JSON only, no markdown." },
                     { role: "user", content: prompt }
@@ -158,21 +158,25 @@ exports.handler = async (event, context) => {
     // ── TIER 4: Cohere Command R ─
     async function cohereCommandR(prompt) {
         if (!cohereKey) throw new Error("Cohere Key missing");
-        const res = await fetch("https://api.cohere.ai/v1/chat", {
+        const res = await fetch("https://api.cohere.com/v2/chat", {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${cohereKey}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "command-r",
-                message: prompt,
-                preamble: "You are an entertainment assistant. Always respond with valid JSON only, no markdown.",
+                model: "command-r-08-2024",
+                messages: [
+                    { role: "system", content: "You are an entertainment assistant. Always respond with valid JSON only, no markdown." },
+                    { role: "user", content: prompt }
+                ],
                 temperature: 0.7
             })
         });
         if (!res.ok) throw new Error(`Cohere error [${res.status}]`);
         const data = await res.json();
+        const parts = data?.message?.content;
+        if (Array.isArray(parts)) return parts.map(c => c.text || '').join('');
         return data?.text;
     }
 
@@ -181,7 +185,7 @@ exports.handler = async (event, context) => {
         { name: 'Gemini 2.5 Flash Lite', fn: gemini25FlashLite },
         { name: 'Groq Llama 3.3 70B', fn: groq33Versatile },
         { name: 'Groq Llama 3.1 8B', fn: groq31Instant },
-        { name: 'OpenRouter Llama 3.1 8B Free', fn: openrouterFree },
+        { name: 'OpenRouter Gemma 4 31B Free', fn: openrouterFree },
         { name: 'Cohere Command R', fn: cohereCommandR },
     ];
 

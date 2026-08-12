@@ -190,6 +190,13 @@ export function getFilteredLibrary(lib, cat, statusFilter, genreFilter, ratingFi
         case 'rating-desc':
             filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
             break;
+        case 'year-desc':
+            // Titles with no year sink to the bottom rather than jumping to the top.
+            filtered.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
+            break;
+        case 'year-asc':
+            filtered.sort((a, b) => (parseInt(a.year) || Infinity) - (parseInt(b.year) || Infinity));
+            break;
         case 'status':
             const order = { watching: 1, 'plan-to-watch': 2, completed: 3, 'on-hold': 4, dropped: 5 };
             filtered.sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));

@@ -420,6 +420,9 @@ body.read-only #select-mode-btn { display: none; }
 }
 .cloud-status-row .cloud-status { flex: 1; min-width: 0; }
 
+.input-compact { padding: 6px 10px; font-size: 13px; height: auto; }
+@media (max-width: 900px) { .input-compact { font-size: 16px; padding: 8px 10px; } }
+
 /* Status picker popup */
 .status-menu {
   position: fixed; z-index: 900; min-width: 172px;
@@ -689,7 +692,8 @@ body.read-only #select-mode-btn { display: none; }
 /* Dashboard Grid */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  /* Continue Watching gets 3/5 of the width, the upcoming + stats column 2/5. */
+  grid-template-columns: 3fr 2fr;
   grid-template-rows: auto auto;
   gap: 20px;
   margin-bottom: 30px;
@@ -825,4 +829,20 @@ body.read-only #select-mode-btn { display: none; }
 }
 .stat-lbl {
   font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; font-weight: 600;
+}
+
+/* ── Touch-friendly form controls ──────────────────────────────────
+   Loaded last so it wins over the compact desktop sizes above. iOS Safari zooms the
+   whole page whenever a focused text field or select renders below 16px, and it never
+   zooms back out — which is what made the home screen appear stuck zoomed in after
+   entering the passcode. */
+@media (max-width: 900px) {
+  .input-field,
+  .filter-bar select,
+  .input-compact,
+  .ep-input,
+  input[type="text"], input[type="search"], input[type="password"],
+  input[type="number"], select, textarea {
+    font-size: 16px;
+  }
 }

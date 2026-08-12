@@ -82,7 +82,8 @@ exactly as before, fully local and fully editable.
 This project uses a **Server-Side API Proxy** pattern.
 - In **production (Netlify)**, frontend requests go to `/.netlify/functions/ai-proxy`. The Netlify serverless function securely reads environment variables and makes the actual calls to Gemini, Groq, OpenRouter, and Cohere.
 - The AI proxy implements a **cascade fallback**: it tries Gemini Flash first, then Gemini Flash Lite, then Groq 70B, Groq 8B, OpenRouter, and finally Cohere Command R.
-- In **local development**, the app falls back to direct API calls using the keys you provide in `js/env.js`. `js/env.js` is gitignored so you don't accidentally commit your keys.
+- In **local development only**, the app falls back to direct API calls using the keys you put in `js/env.js`. That file is gitignored.
+- `build-env.js` deliberately writes an **empty** `js/env.js` during the Netlify build. `js/env.js` is served to the browser, so any key written there would be readable by every visitor. Real keys stay in the Netlify environment and are only read server-side by the proxy functions. The browser never falls back to direct keyed calls in production.
 
 ## Free API Keys
 You can run this project completely for free by getting keys here:

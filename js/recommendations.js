@@ -32,7 +32,13 @@ export async function fetchRecommendations(library, config, excludeTitles = [], 
             .filter(Boolean)
     )].slice(0, 8);
 
-    const allTitles = [...library.map(m => m.title), ...excludeTitles].join(', ');
+    // Keep the prompt bounded — the full list of a large vault made Groq reject the
+    // request with 413 Content Too Large. Newest first, since those matter most for
+    // "don't suggest this again"; the rest is filtered client-side anyway.
+    const EXCLUDE_LIMIT = 120;
+    const excludeAll = [...excludeTitles, ...library.map(m => m.title)];
+    const allTitles = excludeAll.slice(0, EXCLUDE_LIMIT).join(', ')
+        + (excludeAll.length > EXCLUDE_LIMIT ? `, …and ${excludeAll.length - EXCLUDE_LIMIT} more` : '');
     const cats = [...new Set(library.map(m => m.category))].join(', ');
 
     const tasteLines = [

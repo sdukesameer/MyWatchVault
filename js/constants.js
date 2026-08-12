@@ -55,8 +55,8 @@ export const AI_PROVIDERS = [
     { name: 'Gemini 2.5 Flash Lite', model: 'gemini-2.5-flash-lite', type: 'gemini' },
     { name: 'Llama 3.3 70B Versatile (Groq)', model: 'llama-3.3-70b-versatile', type: 'groq' },
     { name: 'Llama 3.1 8B Instant (Groq)', model: 'llama-3.1-8b-instant', type: 'groq' },
-    { name: 'OpenRouter Llama 3.1 8B Free', model: 'meta-llama/llama-3.1-8b-instruct:free', type: 'openrouter' },
-    { name: 'Cohere Command R', model: 'command-r', type: 'cohere' }
+    { name: 'OpenRouter Gemma 4 31B Free', model: 'google/gemma-4-31b-it:free', type: 'openrouter' },
+    { name: 'Cohere Command R', model: 'command-r-08-2024', type: 'cohere' }
 ];
 
 export const PROXY_AI = '/.netlify/functions/ai-proxy';

@@ -6,14 +6,14 @@ const AI_PROVIDERS = [
     { name: 'Gemini 2.5 Flash Lite', model: 'gemini-2.5-flash-lite', type: 'gemini' },
     { name: 'Llama 3.3 70B Versatile (Groq)', model: 'llama-3.3-70b-versatile', type: 'groq' },
     { name: 'Llama 3.1 8B Instant (Groq)', model: 'llama-3.1-8b-instant', type: 'groq' },
-    { name: 'OpenRouter Llama 3.1 8B Free', model: 'meta-llama/llama-3.1-8b-instruct:free', type: 'openrouter' },
-    { name: 'Cohere Command R', model: 'command-r', type: 'cohere' }
+    { name: 'OpenRouter Gemma 4 31B Free', model: 'google/gemma-4-31b-it:free', type: 'openrouter' },
+    { name: 'Cohere Command R', model: 'command-r-08-2024', type: 'cohere' }
 ];
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const GROQ_BASE = 'https://api.groq.com/openai/v1/chat/completions';
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
-const COHERE_BASE = 'https://api.cohere.ai/v1/chat';
+const COHERE_BASE = 'https://api.cohere.com/v2/chat';
 
 const PROXY_AI = '/.netlify/functions/ai-proxy';
 const PROXY_TMDB = '/.netlify/functions/tmdb-proxy';
@@ -364,16 +364,34 @@ export async function fetchSimilarTitles(media, config, limit = 8) {
     return deduped;
 }
 
+// Turns the proxy's provider-by-provider error dump into something actionable.
+function explainProxyFailure(raw) {
+    const text = String(raw || '');
+    const hints = [];
+    if (/\b403\b/.test(text)) hints.push('Gemini rejected the key (403) — check the key is valid and the Generative Language API is enabled for it');
+    if (/\b429\b/.test(text)) hints.push('Groq is rate-limited (429) — wait a minute or use a different key');
+    if (/\b413\b/.test(text)) hints.push('the request was too large (413) for that model');
+    if (/\b404\b/.test(text)) hints.push('a provider model/endpoint no longer exists (404)');
+    if (/not configured|missing/i.test(text)) hints.push('no AI keys are configured on the server');
+
+    return hints.length
+        ? `AI unavailable: ${hints.join('; ')}.`
+        : 'AI unavailable — every provider failed. Check the Netlify function logs and your API keys.';
+}
+
 export async function callAI(prompt, config) {
     const errors = [];
 
+    // In production every AI call goes through the serverless proxy. We deliberately do
+    // NOT fall back to direct calls here: that would require shipping API keys to the
+    // browser, where anyone could read them out of the page source.
     if (isProxied()) {
         try {
             const data = await callViaProxy(prompt);
             lastProviderUsed = data.providerUsed || 'Unknown';
             return data.text || '';
         } catch (err) {
-            console.warn('[proxy] failed, trying direct fallback:', err.message);
+            throw new Error(explainProxyFailure(err.message));
         }
     }
 
@@ -473,8 +491,10 @@ async function callOpenRouter(apiKey, model, prompt) {
 async function callCohere(apiKey, model, prompt) {
     const body = {
         model,
-        message: prompt,
-        preamble: "You are an entertainment assistant. Always respond with valid JSON only, no markdown.",
+        messages: [
+            { role: 'system', content: 'You are an entertainment assistant. Always respond with valid JSON only, no markdown.' },
+            { role: 'user', content: prompt }
+        ],
         temperature: 0.7,
     };
     const controller = new AbortController();
@@ -488,6 +508,9 @@ async function callCohere(apiKey, model, prompt) {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        // v2 returns { message: { content: [{ type:'text', text }] } }
+        const parts = data?.message?.content;
+        if (Array.isArray(parts)) return parts.map(c => c.text || '').join('');
         return data.text || '';
     } finally { clearTimeout(timeout); }
 }

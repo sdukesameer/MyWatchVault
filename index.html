@@ -114,6 +114,8 @@
                 <option value="name-asc">A → Z</option>
                 <option value="name-desc">Z → A</option>
                 <option value="rating-desc">★ Highest Rated</option>
+                <option value="year-desc">📅 Newest Release</option>
+                <option value="year-asc">📅 Oldest Release</option>
                 <option value="status">≡ Status</option>
             </select>
             <select id="status-filter" class="input-field" style="width: auto;">
@@ -268,7 +270,7 @@
                         </div>
                         <div style="flex:1">
                             <div class="field-label">Category</div>
-                            <select id="detail-category" class="input-field" style="padding: 6px; font-size: 13px; height: auto;">
+                            <select id="detail-category" class="input-field input-compact">
                                 <!-- Populated by JS -->
                             </select>
                         </div>
@@ -403,7 +405,7 @@
                 </label>
                 <label class="settings-row">
                     <span>Suggestions per batch</span>
-                    <select id="opt-reco-batch" class="input-field" style="width:auto;padding:5px 8px;font-size:12px;">
+                    <select id="opt-reco-batch" class="input-field input-compact" style="width:auto;">
                         <option value="5">5</option>
                         <option value="10" selected>10</option>
                         <option value="15">15</option>
@@ -455,7 +457,7 @@
                 <div style="margin-top:16px;">
                     <label class="settings-row">
                         <span>Default type for rows with no type column</span>
-                        <select id="csv-default-cat" class="input-field" style="width:auto;padding:5px 8px;font-size:12px;">
+                        <select id="csv-default-cat" class="input-field input-compact" style="width:auto;">
                             <option value="movie">Movie</option>
                             <option value="series">Web Series</option>
                             <option value="anime-series">Anime Series</option>
