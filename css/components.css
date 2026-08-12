@@ -299,7 +299,24 @@
 .modal-body { padding: 24px 28px; }
 .modal-footer {
   padding: 16px 28px 24px; display: flex; gap: 10px;
-  justify-content: flex-end; border-top: 1px solid var(--border);
+  justify-content: flex-end; align-items: center; border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* Keyboard hint in the footer */
+.modal-hint {
+  margin-right: auto; font-size: 11px; color: var(--text-muted);
+  display: flex; align-items: center; gap: 4px; white-space: nowrap;
+}
+.modal-hint kbd {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 4px; padding: 2px 5px; color: var(--text-dim);
+}
+@media (max-width: 620px) {
+  /* Not useful on a touch keyboard, and it crowds the buttons. */
+  .modal-hint { display: none; }
 }
 
 @media (max-width: 768px) {

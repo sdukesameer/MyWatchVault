@@ -755,6 +755,13 @@ export function renderConfirmModal(title, text, confirmText, onConfirm) {
     
     modal.querySelector('.confirm-cancel').addEventListener('click', close);
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+    // Own the keyboard while open: Esc dismisses, Enter activates the focused button.
+    modal.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    });
+    // Focus Cancel, not the destructive action, so a stray Enter is harmless.
+    setTimeout(() => modal.querySelector('.confirm-cancel')?.focus(), 20);
     modal.querySelector('.confirm-action').addEventListener('click', () => {
         onConfirm();
         close();

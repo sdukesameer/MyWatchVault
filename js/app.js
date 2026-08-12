@@ -18,7 +18,7 @@ const state = {
     syncResults: {},
     config: {},
     currentCat: 'all',
-    sortBy: 'recently-added',
+    sortBy: 'year-desc',
     filterStatus: 'all',
     filterGenre: 'all',
     filterRating: 'all',
@@ -1088,7 +1088,37 @@ function bindEvents() {
         searchInput.value = '';
         openDetail(mediaId);
     });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { dropdown.style.display = 'none'; document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); } });
+    // Esc closes the top-most thing only, and routes the detail modal through its
+    // normal cancel path so unsaved changes still prompt.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+
+        if (dropdown.style.display === 'block') { dropdown.style.display = 'none'; return; }
+
+        const confirmCard = document.querySelector('.modal-overlay:not(.hidden) .modal-card.narrow');
+        if (confirmCard) { confirmCard.closest('.modal-overlay').querySelector('.confirm-cancel')?.click(); return; }
+
+        ui.closeStatusMenu();
+
+        if (!document.getElementById('detail-modal').classList.contains('hidden')) {
+            handleDetailClose();
+            return;
+        }
+        const open = document.querySelector('.modal-overlay:not(.hidden)');
+        if (open) open.classList.add('hidden');
+    });
+
+    // Enter saves the detail modal. Textareas keep Enter for newlines (Cmd/Ctrl+Enter
+    // saves from there), and it must not hijack Enter inside the search dropdown.
+    document.getElementById('detail-modal').addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        const el = e.target;
+        const isTextarea = el.tagName === 'TEXTAREA';
+        if (isTextarea && !(e.metaKey || e.ctrlKey)) return;
+        if (el.tagName === 'BUTTON' || el.classList.contains('status-opt') || el.classList.contains('star')) return;
+        e.preventDefault();
+        document.getElementById('detail-save-btn').click();
+    });
 
     // Manual Add Modal
     document.getElementById('manual-add-btn').addEventListener('click', () => { if (guardEdit()) ui.openModal('add-modal'); });

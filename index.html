@@ -110,12 +110,12 @@
         <!-- Filter and Sort Bar -->
         <div class="filter-bar">
             <select id="sort-select" class="input-field" style="width: auto;">
+                <option value="year-desc" selected>📅 Newest Release</option>
+                <option value="year-asc">📅 Oldest Release</option>
                 <option value="recently-added">↓ Recently Added</option>
                 <option value="name-asc">A → Z</option>
                 <option value="name-desc">Z → A</option>
                 <option value="rating-desc">★ Highest Rated</option>
-                <option value="year-desc">📅 Newest Release</option>
-                <option value="year-asc">📅 Oldest Release</option>
                 <option value="status">≡ Status</option>
             </select>
             <select id="status-filter" class="input-field" style="width: auto;">
@@ -234,14 +234,14 @@
 <div id="detail-modal" class="modal-overlay hidden">
     <div class="modal-card wide">
         <div class="modal-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
-            <div style="flex:1;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <div class="modal-title" id="detail-title">—</div>
-                    <button class="btn btn-secondary btn-sm" id="detail-sync-btn" style="padding:4px 8px; font-size:12px;" title="Fetch latest episodes/seasons">🔄 Sync</button>
-                </div>
+            <div style="flex:1;min-width:0;">
+                <div class="modal-title" id="detail-title">—</div>
                 <div class="modal-subtitle" id="detail-subtitle">—</div>
             </div>
-            <button class="modal-close" id="detail-close">✕</button>
+            <div class="modal-header-actions">
+                <button class="btn btn-secondary btn-sm" id="detail-sync-btn" title="Fetch latest episodes/seasons">🔄 Sync</button>
+                <button class="modal-close" id="detail-close" title="Close (Esc)">✕</button>
+            </div>
         </div>
         <div class="modal-body">
             <div class="detail-poster-row">
@@ -301,7 +301,10 @@
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-ghost" id="detail-delete-btn" style="color:var(--danger);margin-right:auto;">🗑 Remove</button>
+            <button class="btn btn-ghost" id="detail-delete-btn" style="color:var(--danger);">🗑 Remove</button>
+            <span class="modal-hint">
+                <kbd>Enter</kbd> to save · <kbd>Esc</kbd> to cancel
+            </span>
             <button class="btn btn-secondary" id="detail-cancel-btn">Cancel</button>
             <button class="btn btn-primary" id="detail-save-btn">Save Changes</button>
         </div>

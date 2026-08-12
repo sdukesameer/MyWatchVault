@@ -104,6 +104,8 @@ export function setupModalAccessibility(modalId, closeBtnId, closeCallback) {
 
     modal.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            // A confirm dialog sits above this modal and owns Escape while it's open.
+            if (document.querySelector('.modal-overlay:not(.hidden) .modal-card.narrow')) return;
             e.stopPropagation();
             closeCallback();
         }
