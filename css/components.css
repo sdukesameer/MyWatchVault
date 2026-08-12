@@ -164,11 +164,18 @@
 /* Grid */
 .media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  /* auto-fit (not auto-fill) collapses empty tracks, so however many cards fit stretch
+     to fill the row — two wide tiles until there's genuinely room for a third. */
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
   gap: 18px; margin-bottom: 60px;
 }
 @media (max-width: 768px) {
-  .media-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .media-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+}
+@media (max-width: 420px) {
+  /* Two columns is the floor: never squeeze to a single tile on a phone. */
+  .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .card-poster { height: 200px; }
 }
 
 /* Media Card */
@@ -510,6 +517,16 @@ body.read-only #select-mode-btn { display: none; }
 }
 .settings-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
+/* Import wizard */
+.import-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); }
+.import-tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); font-family: 'DM Sans', sans-serif; font-size: 13px;
+  font-weight: 600; padding: 8px 12px; cursor: pointer; margin-bottom: -1px;
+}
+.import-tab:hover { color: var(--text); }
+.import-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
 /* CSV wizard */
 .csv-map-grid { display: flex; flex-direction: column; gap: 10px; }
 .csv-map-row { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: center; }
@@ -531,7 +548,10 @@ body.read-only #select-mode-btn { display: none; }
 .csv-badge.dupe { color: var(--accent3); background: rgba(255,214,10,0.12); border: 1px solid rgba(255,214,10,0.3); }
 .csv-skip { font-size: 11px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 5px; }
 .similar-list {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;
+}
+@media (max-width: 420px) {
+  .similar-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 }
 .similar-card {
   background: var(--surface); border: 1px solid var(--border);
@@ -593,8 +613,11 @@ body.read-only #select-mode-btn { display: none; }
 
 /* Reco Grid */
 .reco-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 18px; margin-top: 24px;
+}
+@media (max-width: 420px) {
+  .reco-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 }
 .reco-card {
   background: var(--card); border: 1px solid var(--border);
@@ -692,8 +715,8 @@ body.read-only #select-mode-btn { display: none; }
 /* Dashboard Grid */
 .dashboard-grid {
   display: grid;
-  /* Continue Watching gets 3/5 of the width, the upcoming + stats column 2/5. */
-  grid-template-columns: 3fr 2fr;
+  /* Continue Watching gets 80% of the width, the upcoming + stats column 20%. */
+  grid-template-columns: 4fr 1fr;
   grid-template-rows: auto auto;
   gap: 20px;
   margin-bottom: 30px;

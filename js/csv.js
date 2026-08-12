@@ -157,3 +157,32 @@ export function toCSV(library) {
     });
     return lines.join('\n');
 }
+
+// Parses a pasted list — one title per line. Tolerates numbered/bulleted lists and a
+// trailing "(2019)" year, which people paste out of habit.
+export function parseTitleList(text) {
+    const seen = new Set();
+    return String(text || '')
+        .split(/\r?\n/)
+        .map(line => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+        .filter(Boolean)
+        .map(line => {
+            const m = line.match(/^(.*?)[\s(\[]+((?:19|20)\d{2})[)\]]?\s*$/);
+            const title = (m ? m[1] : line).replace(/[,;]\s*$/, '').trim();
+            return { title, year: m ? parseInt(m[2]) : null };
+        })
+        .filter(row => {
+            if (!row.title) return false;
+            const key = row.title.toLowerCase();
+            if (seen.has(key)) return false;   // drop duplicate lines
+            seen.add(key);
+            return true;
+        })
+        .map(row => ({
+            title: row.title,
+            year: row.year,
+            category: '',      // resolved by the lookup
+            status: 'plan-to-watch',
+            genre: '', rating: 0, notes: '', tags: []
+        }));
+}

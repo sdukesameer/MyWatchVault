@@ -10,7 +10,7 @@ A polished, personal entertainment tracker with AI-powered sync and personalized
 - **Smart Deep Sync**: Automatically checks Jikan (Anime) and TMDB (Shows/Movies) for new seasons, episodes, or sequels, automatically updating your watch status.
 - **Auto-Metadata Population**: Manually adding an item by title instantly fetches the official poster, global rating, and synopsis in the background.
 - **AI Recommendations**: Get personalized recommendations based on what you have liked and completed.
-- **CSV Import Wizard**: Import from MyAnimeList, Trakt, IMDb or Letterboxd exports — columns are auto-detected, mapped, and titles can be corrected before importing. CSV export too.
+- **Bulk Import**: Paste a plain list of titles, one per line, and every detail — type, year, genre, poster, episode counts — is looked up automatically. Or load a CSV from MyAnimeList, Trakt, IMDb or Letterboxd and map the columns. CSV export too.
 - **Bulk Editing**: Select one, many, or all visible titles and change status or remove in one go.
 - **Grouping & Filtering**: Group your vault by status, type, genre or rating; filter by any of those plus a free-text search over titles, tags and genres.
 - **Light & Dark Mode**: Toggle in the navbar; your choice is remembered.

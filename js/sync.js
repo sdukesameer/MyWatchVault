@@ -1,7 +1,7 @@
 // js/sync.js
 // AI Sync Engine
 
-import { callTMDB, getLastProvider, callAI, extractJSON, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount } from './api.js';
+import { callTMDB, getLastProvider, callAI, extractJSON, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, mapWithLimit } from './api.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './constants.js';
 import { escapeHTML, showToast } from './utils.js';
 import { loadSyncMeta, normalizeTitle } from './library.js';
@@ -19,6 +19,10 @@ function ensureSeasonsUpTo(media, latest) {
     media.seasons.sort((a, b) => (a.number || 0) - (b.number || 0));
 }
 
+// One retry and a shorter deadline: a full sync fans out over the whole library, so
+// a stalled upstream must not multiply into minutes of waiting.
+const SYNC_FETCH = { retries: 1, timeoutMs: 9000 };
+
 const watchedTotal = seasons =>
     (seasons || []).reduce((acc, s) => acc + (parseInt(s.watched) || 0), 0);
 
@@ -28,13 +32,16 @@ export async function runSync(library, config, onProgress) {
     const newSyncResults = {};
     const updatedLibrary = [...library];
     
-    const promises = updatedLibrary.map(async (media) => {
+    // Jikan allows ~3 requests/sec, so a whole library fired at once just rate-limits
+    // itself. Work through the list a few at a time instead.
+    const SYNC_CONCURRENCY = 4;
+    await mapWithLimit(updatedLibrary, SYNC_CONCURRENCY, async (media) => {
         let result = null;
         try {
             if (media.category === 'movie' || media.category === 'anime-movie') {
                 result = { latestStatus: 'Released', isOngoing: false, upToDate: true };
             } else if (media.jikanId) {
-                const res = await jikanFetch(`/anime/${media.jikanId}`);
+                const res = await jikanFetch(`/anime/${media.jikanId}`, SYNC_FETCH);
                 if (res?.data) {
                     let latestEpisodes = parseInt(res.data.episodes) || 0;
                     // Airing shows report no count; fall back to counting aired episodes.
@@ -57,8 +64,8 @@ export async function runSync(library, config, onProgress) {
                 }
             } else if (media.tvmazeId) {
                 const [showRes, seasonsRes] = await Promise.all([
-                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}`),
-                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}/seasons`).then(r => r || [])
+                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}`, SYNC_FETCH),
+                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}/seasons`, SYNC_FETCH).then(r => r || [])
                 ]);
 
                 if (showRes && showRes.status) {
@@ -94,7 +101,7 @@ export async function runSync(library, config, onProgress) {
                 }
             } else if (media.tmdbId) {
                 if (media.category === 'movie') {
-                    const res = await (await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${config.tmdbKey || ''}`)).json().catch(()=>({}));
+                    const res = (await callTMDB('movie-details', { tvId: media.tmdbId }, config).catch(() => null)) || {};
                     if (res.status) {
                         result = {
                             latestStatus: res.status,
@@ -103,7 +110,7 @@ export async function runSync(library, config, onProgress) {
                         };
                     }
                 } else if (media.category === 'series' || media.category === 'anime-series') {
-                    const res = await (await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}?api_key=${config.tmdbKey || ''}`)).json().catch(()=>({}));
+                    const res = (await callTMDB('tv-details', { tvId: media.tmdbId }, config).catch(() => null)) || {};
                     if (res.status) {
                         result = {
                             latestStatus: res.status,
@@ -145,7 +152,6 @@ export async function runSync(library, config, onProgress) {
         if (onProgress) onProgress();
     });
 
-    await Promise.allSettled(promises);
     return { updatedLibrary, syncResults: newSyncResults };
 }
 

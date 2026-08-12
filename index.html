@@ -437,16 +437,35 @@
             <button class="modal-close" id="csv-close">✕</button>
         </div>
         <div class="modal-body">
-            <!-- Step 1: file -->
+            <!-- Step 1: paste a list (default) or load a CSV -->
             <div id="csv-step-file">
-                <p style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-bottom:14px;">
-                    Pick a <code>.csv</code> file. A header row is expected — you'll map the columns next.
-                    Exports from MyAnimeList, Trakt, IMDb and Letterboxd generally work.
-                </p>
-                <label class="btn btn-secondary" style="justify-content:center;cursor:pointer;width:100%;">
-                    Choose CSV file…
-                    <input type="file" id="csv-file-input" accept=".csv,text/csv" style="display:none;">
-                </label>
+                <div class="import-tabs">
+                    <button class="import-tab active" data-mode="paste">📝 Paste titles</button>
+                    <button class="import-tab" data-mode="csv">📄 CSV file</button>
+                </div>
+
+                <div id="import-mode-paste">
+                    <p style="font-size:13px;color:var(--text-dim);line-height:1.7;margin:14px 0;">
+                        One title per line. Details — type, year, genre, poster, episode counts — are
+                        looked up automatically for each one.
+                    </p>
+                    <textarea id="paste-titles" class="input-field" rows="9"
+                              style="resize:vertical;font-family:'DM Sans',sans-serif;line-height:1.7;"
+                              placeholder="Breaking Bad&#10;Attack on Titan&#10;Inception&#10;Dune: Part Two"></textarea>
+                    <div id="paste-count" style="font-size:12px;color:var(--text-muted);margin-top:8px;">0 titles</div>
+                </div>
+
+                <div id="import-mode-csv" style="display:none;">
+                    <p style="font-size:13px;color:var(--text-dim);line-height:1.7;margin:14px 0;">
+                        Pick a <code>.csv</code> file. A header row is expected — you'll map the columns next.
+                        Exports from MyAnimeList, Trakt, IMDb and Letterboxd generally work.
+                    </p>
+                    <label class="btn btn-secondary" style="justify-content:center;cursor:pointer;width:100%;">
+                        Choose CSV file…
+                        <input type="file" id="csv-file-input" accept=".csv,text/csv" style="display:none;">
+                    </label>
+                </div>
+
                 <div id="csv-file-error" style="display:none;color:var(--danger);font-size:13px;margin-top:12px;"></div>
             </div>
 

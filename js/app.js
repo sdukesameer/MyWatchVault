@@ -5,12 +5,12 @@ import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations, enhanceRecommendation, updateRecommendationCard, applyRecoFilters, recoGenres } from './recommendations.js';
-import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback } from './api.js';
+import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback, kitsuAnime } from './api.js';
 import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility, debounce } from './utils.js';
 import { setupSearch } from './search.js';
 import { getStats, getDashboardItems } from './dashboard.js';
 import * as cloud from './cloud.js';
-import { parseCSV, guessMapping, buildRows, toCSV, CSV_FIELDS } from './csv.js';
+import { parseCSV, guessMapping, buildRows, toCSV, CSV_FIELDS, parseTitleList } from './csv.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, normalizeTags, isSeriesCategory } from './constants.js';
 
 const state = {
@@ -526,25 +526,118 @@ async function pullFromCloud({ silent = false } = {}) {
     }
 }
 
-// ── CSV import wizard ───────────────────────────────────────────
-const csv = { rows: [], headers: [], mapping: {}, items: [], step: 1 };
+// Works out what a bare title actually is (anime / series / movie) plus its metadata,
+// so a pasted list needs nothing but names. Tries the anime databases first, then TV,
+// then film — whichever answers with the best-matching name wins.
+async function identifyTitle(title) {
+    const looksLikeMatch = (candidate) => {
+        const a = lib.normalizeTitle(candidate), b = lib.normalizeTitle(title);
+        return a === b || a.includes(b) || b.includes(a);
+    };
+
+    // 1. Anime (Jikan, then Kitsu — both keyless)
+    try {
+        const j = await jikanFetch(`/anime?q=${encodeURIComponent(title)}&limit=1`, { retries: 1 });
+        const hit = j?.data?.[0];
+        if (hit && looksLikeMatch(hit.title_english || hit.title)) {
+            return {
+                title: hit.title_english || hit.title,
+                category: hit.type === 'Movie' ? 'anime-movie' : 'anime-series',
+                year: hit.year || (hit.aired?.from ? new Date(hit.aired.from).getFullYear() : null),
+                genre: hit.genres?.map(g => g.name).join(', ') || '',
+                description: (hit.synopsis || '').slice(0, 300),
+                poster: hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || null,
+                globalRating: hit.score ? `${hit.score} ★` : null,
+                jikanId: hit.mal_id
+            };
+        }
+    } catch { /* fall through */ }
+
+    try {
+        const k = await kitsuAnime(title);
+        if (k && looksLikeMatch(k.title)) {
+            return {
+                title: k.title,
+                category: k.isMovie ? 'anime-movie' : 'anime-series',
+                year: k.year, poster: k.poster, globalRating: k.globalRating,
+                description: k.description
+            };
+        }
+    } catch { /* fall through */ }
+
+    // 2. Live-action TV (TVmaze, keyless)
+    try {
+        const tv = await fetchJSONRetry(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`, { retries: 1 });
+        const show = tv?.[0]?.show;
+        if (show && looksLikeMatch(show.name)) {
+            return {
+                title: show.name,
+                category: 'series',
+                year: show.premiered ? new Date(show.premiered).getFullYear() : null,
+                genre: (show.genres || []).join(', '),
+                description: (show.summary || '').replace(/<[^>]*>?/gm, '').slice(0, 300),
+                poster: show.image?.original || show.image?.medium || null,
+                globalRating: show.rating?.average ? `${show.rating.average} ★` : null,
+                tvmazeId: show.id
+            };
+        }
+    } catch { /* fall through */ }
+
+    // 3. Film (TMDB via the proxy)
+    try {
+        const mv = await callTMDB('search-movie', { query: title }, state.config);
+        const hit = mv?.results?.[0];
+        if (hit) {
+            return {
+                title: hit.title,
+                category: 'movie',
+                year: hit.release_date ? parseInt(hit.release_date.slice(0, 4)) : null,
+                description: (hit.overview || '').slice(0, 300),
+                poster: hit.poster_path ? `https://image.tmdb.org/t/p/w500${hit.poster_path}` : null,
+                globalRating: hit.vote_average ? `${hit.vote_average.toFixed(1)} ★` : null,
+                tmdbId: hit.id
+            };
+        }
+    } catch { /* fall through */ }
+
+    return {}; // nothing matched — caller keeps the raw title
+}
+
+// ── Import wizard (paste a list, or map a CSV) ──────────────────
+const csv = { rows: [], headers: [], mapping: {}, items: [], step: 1, mode: 'paste' };
 
 function openCsvWizard() {
     csv.rows = []; csv.headers = []; csv.mapping = {}; csv.items = []; csv.step = 1;
     document.getElementById('csv-file-input').value = '';
     document.getElementById('csv-file-error').style.display = 'none';
+    document.getElementById('paste-titles').value = '';
+    setImportMode('paste');
     showCsvStep(1);
     ui.openModal('csv-modal');
 }
 
+function setImportMode(mode) {
+    csv.mode = mode;
+    document.querySelectorAll('.import-tab').forEach(t =>
+        t.classList.toggle('active', t.dataset.mode === mode));
+    document.getElementById('import-mode-paste').style.display = mode === 'paste' ? 'block' : 'none';
+    document.getElementById('import-mode-csv').style.display = mode === 'csv' ? 'block' : 'none';
+    document.getElementById('csv-file-error').style.display = 'none';
+    showCsvStep(1);
+}
+
+function pastedTitleCount() {
+    return parseTitleList(document.getElementById('paste-titles').value).length;
+}
+
 function showCsvStep(step) {
     csv.step = step;
-    const labels = {
-        1: 'Step 1 of 3 — choose a file',
-        2: 'Step 2 of 3 — map the columns',
-        3: 'Step 3 of 3 — review and confirm'
-    };
-    document.getElementById('csv-step-label').textContent = labels[step];
+    const paste = csv.mode === 'paste';
+    const labels = paste
+        ? { 1: 'Step 1 of 2 — paste your titles', 3: 'Step 2 of 2 — review and confirm' }
+        : { 1: 'Step 1 of 3 — choose a file', 2: 'Step 2 of 3 — map the columns',
+            3: 'Step 3 of 3 — review and confirm' };
+    document.getElementById('csv-step-label').textContent = labels[step] || '';
     document.getElementById('csv-step-file').style.display = step === 1 ? 'block' : 'none';
     document.getElementById('csv-step-map').style.display = step === 2 ? 'block' : 'none';
     document.getElementById('csv-step-review').style.display = step === 3 ? 'block' : 'none';
@@ -552,7 +645,7 @@ function showCsvStep(step) {
 
     const next = document.getElementById('csv-next-btn');
     next.textContent = step === 3 ? 'Import' : 'Next →';
-    next.disabled = step === 1 ? csv.rows.length === 0
+    next.disabled = step === 1 ? (paste ? pastedTitleCount() === 0 : csv.rows.length === 0)
         : step === 2 ? csv.mapping.title === undefined
         : false;
 }
@@ -603,7 +696,7 @@ function renderCsvReview() {
         row.className = 'csv-review-row';
         row.innerHTML = `
             <input class="csv-title-input" value="${escapeHTML(item.title)}" ${dupe ? 'disabled' : ''}>
-            <span class="csv-badge ${dupe ? 'dupe' : 'new'}">${dupe ? 'in vault' : CAT_LABELS[item.category] || item.category}</span>
+            <span class="csv-badge ${dupe ? 'dupe' : 'new'}">${dupe ? 'in vault' : (CAT_LABELS[item.category] || 'auto-detect')}</span>
             <label class="csv-skip"><input type="checkbox" ${dupe ? 'checked disabled' : ''}> skip</label>`;
 
         row.querySelector('.csv-title-input').addEventListener('input', (e) => {
@@ -634,6 +727,8 @@ async function runCsvImport() {
         let enriched = { ...item };
         if (lookup) {
             try {
+                // Pasted lines carry only a name, so identify what it actually is first.
+                if (!enriched.category) enriched = { ...enriched, ...(await identifyTitle(enriched.title)) };
                 const seasons = await fetchDeepDetails(enriched);
                 enriched.seasons = seasons;
                 if (!enriched.poster) {
@@ -642,6 +737,7 @@ async function runCsvImport() {
                 }
             } catch { /* keep the plain row */ }
         }
+        if (!enriched.category) enriched.category = 'movie';
 
         lib.addMedia(state.library, applyStatusToItem(enriched, enriched.status));
         added++;
@@ -762,16 +858,25 @@ async function backfillPosters() {
 }
 
 // ── Sync Handler ────────────────────────────────────────────────
+const SYNC_MAX_MS = 4 * 60 * 1000;
+
 async function handleRunSync() {
     if (!guardEdit()) return;
     try {
         let completed = 0;
         const total = state.library.length;
         showLoading('Running sync…', `Checking latest status of your tracked titles (0/${total})`);
-        const res = await runSync(state.library, state.config, () => {
-            completed++;
-            document.getElementById('loading-sub').textContent = `Checking latest status of your tracked titles (${completed}/${total})`;
-        });
+        // Bound the whole run: a single stalled request used to freeze the overlay
+        // partway through with no way out.
+        const res = await Promise.race([
+            runSync(state.library, state.config, () => {
+                completed++;
+                const sub = document.getElementById('loading-sub');
+                if (sub) sub.textContent = `Checking latest status of your tracked titles (${completed}/${total})`;
+            }),
+            new Promise((_, reject) => setTimeout(
+                () => reject(new Error(`timed out after ${completed}/${total} titles`)), SYNC_MAX_MS))
+        ]);
         
         state.library = res.updatedLibrary;
         state.syncResults = res.syncResults;
@@ -1361,6 +1466,7 @@ function bindEvents() {
                 csv.rows = rows;
                 csv.headers = rows[0].map(h => String(h).trim());
                 csv.mapping = guessMapping(csv.headers);
+                csv.mode = 'csv';
                 err.style.display = 'none';
                 renderCsvMapping();
                 showCsvStep(2);
@@ -1378,8 +1484,27 @@ function bindEvents() {
         reader.readAsText(file);
     });
 
-    document.getElementById('csv-back-btn').addEventListener('click', () => showCsvStep(csv.step - 1));
+    document.querySelectorAll('.import-tab').forEach(tab => {
+        tab.addEventListener('click', () => setImportMode(tab.dataset.mode));
+    });
+    document.getElementById('paste-titles').addEventListener('input', () => {
+        const n = pastedTitleCount();
+        document.getElementById('paste-count').textContent = `${n} title${n === 1 ? '' : 's'}`;
+        document.getElementById('csv-next-btn').disabled = n === 0;
+    });
+
+    document.getElementById('csv-back-btn').addEventListener('click', () => {
+        // Paste mode has no mapping step to go back through.
+        showCsvStep(csv.mode === 'paste' ? 1 : csv.step - 1);
+    });
     document.getElementById('csv-next-btn').addEventListener('click', () => {
+        if (csv.step === 1 && csv.mode === 'paste') {
+            csv.items = parseTitleList(document.getElementById('paste-titles').value);
+            if (!csv.items.length) { showToast('Add at least one title', 'error'); return; }
+            renderCsvReview();
+            showCsvStep(3);
+            return;
+        }
         if (csv.step === 2) {
             csv.items = buildRows(csv.rows, csv.mapping, {
                 defaultCategory: document.getElementById('csv-default-cat').value

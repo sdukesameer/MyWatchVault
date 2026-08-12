@@ -36,11 +36,22 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // Generic JSON GET with backoff on rate limits and upstream errors. Returns null once
 // the retries are exhausted so callers can degrade instead of throwing.
-export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600, headers } = {}) {
+const FETCH_TIMEOUT_MS = 15000;
+
+export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600, headers, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
     let delay = baseDelay;
     for (let attempt = 0; ; attempt++) {
+        // Every request needs its own deadline. Without one a stalled connection hangs
+        // forever, which is what left a full sync frozen partway through.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const onOuterAbort = () => controller.abort();
+        if (signal) {
+            if (signal.aborted) { clearTimeout(timer); throw new DOMException('Aborted', 'AbortError'); }
+            signal.addEventListener('abort', onOuterAbort, { once: true });
+        }
         try {
-            const res = await fetch(url, { signal, headers });
+            const res = await fetch(url, { signal: controller.signal, headers });
             if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
             if (!res.ok) return null; // 404 and friends: retrying won't help
             const data = await res.json();
@@ -50,15 +61,36 @@ export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600
             }
             return data;
         } catch (err) {
-            if (err.name === 'AbortError') throw err;
+            // Our own deadline fired: treat it as a retryable failure, not a real abort.
+            const timedOut = err.name === 'AbortError' && !signal?.aborted;
+            if (err.name === 'AbortError' && signal?.aborted) throw err;
             if (attempt >= retries) {
-                console.warn(`[fetch] gave up on ${url}: ${err.message}`);
+                console.warn(`[fetch] gave up on ${url}: ${timedOut ? `timed out after ${timeoutMs}ms` : err.message}`);
                 return null;
             }
             await sleep(delay);
             delay *= 2;
+        } finally {
+            clearTimeout(timer);
+            if (signal) signal.removeEventListener('abort', onOuterAbort);
         }
     }
+}
+
+// Runs async tasks with a cap on how many are in flight. A full sync used to fire one
+// request per title at once, which guaranteed rate-limit errors from Jikan (3 req/sec).
+export async function mapWithLimit(items, limit, worker) {
+    const results = new Array(items.length);
+    let next = 0;
+    const runners = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+        while (next < items.length) {
+            const i = next++;
+            try { results[i] = await worker(items[i], i); }
+            catch (err) { results[i] = undefined; }
+        }
+    });
+    await Promise.all(runners);
+    return results;
 }
 
 // Jikan fronts MyAnimeList and intermittently returns 504 "MyAnimeList may be down".
@@ -115,17 +147,14 @@ export async function callTMDB(proxyEndpoint, params, config, signal) {
         else if (proxyEndpoint === 'tv-similar') url = `https://api.themoviedb.org/3/tv/${params.tvId}/recommendations?api_key=${tmdbKey}`;
         else if (proxyEndpoint === 'movie-similar') url = `https://api.themoviedb.org/3/movie/${params.tvId}/recommendations?api_key=${tmdbKey}`;
 
-        const res = await fetch(url, { signal });
-        if (!res.ok) throw new Error(`TMDB error ${res.status}`);
-        return await res.json();
+        const data = await fetchJSONRetry(url, { signal, retries: 1 });
+        if (!data) throw new Error('TMDB request failed');
+        return data;
     } else {
         const queryParams = new URLSearchParams({ endpoint: proxyEndpoint, ...params });
-        const res = await fetch(`${PROXY_TMDB}?${queryParams.toString()}`, { signal });
-        if (!res.ok) {
-            const errText = await res.text().catch(()=>'');
-            throw new Error(`TMDB proxy error ${res.status}: ${errText}`);
-        }
-        return await res.json();
+        const data = await fetchJSONRetry(`${PROXY_TMDB}?${queryParams.toString()}`, { signal, retries: 1 });
+        if (!data) throw new Error('TMDB proxy request failed');
+        return data;
     }
 }
 
