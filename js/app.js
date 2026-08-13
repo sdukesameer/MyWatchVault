@@ -397,7 +397,7 @@ function initTheme() {
 
 // ── Preferences ─────────────────────────────────────────────────
 const PREFS_KEY = 'watchvault_prefs';
-const DEFAULT_PREFS = { autosync: true, dailySync: true, artwork: true, recoBatch: 10 };
+const DEFAULT_PREFS = { autosync: true, dailySync: true, artwork: true, recoBatch: 10, askPasscode: true };
 let prefs = { ...DEFAULT_PREFS };
 
 function loadPrefs() {
@@ -413,11 +413,14 @@ function savePrefs() {
 }
 
 function syncPrefsToUI() {
-    const map = { 'opt-autosync': 'autosync', 'opt-daily-sync': 'dailySync', 'opt-artwork': 'artwork' };
+    const map = { 'opt-autosync': 'autosync', 'opt-daily-sync': 'dailySync',
+                  'opt-artwork': 'artwork', 'opt-ask-passcode': 'askPasscode' };
     Object.entries(map).forEach(([id, key]) => {
         const el = document.getElementById(id);
-        if (el) el.checked = Boolean(prefs[key]);
+        if (el) el.checked = prefs[key] !== false;
     });
+    const askInPrompt = document.getElementById('passcode-ask-again');
+    if (askInPrompt) askInPrompt.checked = prefs.askPasscode !== false;
     const batch = document.getElementById('opt-reco-batch');
     if (batch) batch.value = String(prefs.recoBatch);
 }
@@ -747,6 +750,55 @@ async function runCsvImport() {
     render();
     syncUp();
     showToast(`Imported ${added} title${added === 1 ? '' : 's'} ✓`, 'success');
+}
+
+// ── Passcode prompt on load ─────────────────────────────────────
+function openPasscodePrompt() {
+    const input = document.getElementById('passcode-input');
+    const err = document.getElementById('passcode-error');
+    input.value = '';
+    err.style.display = 'none';
+    document.getElementById('passcode-ask-again').checked = prefs.askPasscode !== false;
+    ui.openModal('passcode-modal');
+    setTimeout(() => input.focus(), 60);
+}
+
+function closePasscodePrompt() {
+    ui.closeModal('passcode-modal');
+}
+
+// Only worth showing when a cloud DB is configured, a passcode exists, and this tab
+// isn't already unlocked.
+function maybePromptForPasscode() {
+    const st = cloud.cloudStatus();
+    if (!st.configured || !st.canLogin || cloud.isEditor()) return;
+    if (prefs.askPasscode === false) return;
+    openPasscodePrompt();
+}
+
+async function submitPasscode() {
+    const input = document.getElementById('passcode-input');
+    const err = document.getElementById('passcode-error');
+    const code = input.value.trim();
+    if (!code) { err.textContent = 'Enter the passcode, or continue read-only.'; err.style.display = 'block'; return; }
+
+    const btn = document.getElementById('passcode-submit');
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    try {
+        await cloud.login(code);
+        closePasscodePrompt();
+        refreshCloudUI();
+        showToast('Editing unlocked ✓', 'success');
+        await pullFromCloud({ silent: true });
+    } catch (e) {
+        err.textContent = e.message;
+        err.style.display = 'block';
+        input.select();
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Unlock';
+    }
 }
 
 // ── Bulk selection ──────────────────────────────────────────────
@@ -1095,8 +1147,8 @@ function bindEvents() {
 
         if (dropdown.style.display === 'block') { dropdown.style.display = 'none'; return; }
 
-        const confirmCard = document.querySelector('.modal-overlay:not(.hidden) .modal-card.narrow');
-        if (confirmCard) { confirmCard.closest('.modal-overlay').querySelector('.confirm-cancel')?.click(); return; }
+        const confirmCancel = document.querySelector('.modal-overlay:not(.hidden) .confirm-cancel');
+        if (confirmCancel) { confirmCancel.click(); return; }
 
         ui.closeStatusMenu();
 
@@ -1423,9 +1475,10 @@ function bindEvents() {
     });
 
     // Preferences
-    const prefMap = { 'opt-autosync': 'autosync', 'opt-daily-sync': 'dailySync', 'opt-artwork': 'artwork' };
+    const prefMap = { 'opt-autosync': 'autosync', 'opt-daily-sync': 'dailySync',
+                      'opt-artwork': 'artwork', 'opt-ask-passcode': 'askPasscode' };
     Object.entries(prefMap).forEach(([id, key]) => {
-        document.getElementById(id).addEventListener('change', (e) => {
+        document.getElementById(id)?.addEventListener('change', (e) => {
             prefs[key] = e.target.checked;
             savePrefs();
         });
@@ -1433,6 +1486,22 @@ function bindEvents() {
     document.getElementById('opt-reco-batch').addEventListener('change', (e) => {
         prefs.recoBatch = parseInt(e.target.value) || 10;
         savePrefs();
+    });
+
+    // Passcode prompt
+    document.getElementById('passcode-submit').addEventListener('click', submitPasscode);
+    document.getElementById('passcode-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submitPasscode(); }
+    });
+    document.getElementById('passcode-skip').addEventListener('click', closePasscodePrompt);
+    setupModalAccessibility('passcode-modal', 'passcode-close', closePasscodePrompt);
+    document.getElementById('passcode-modal').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closePasscodePrompt();
+    });
+    document.getElementById('passcode-ask-again').addEventListener('change', (e) => {
+        prefs.askPasscode = e.target.checked;
+        savePrefs();
+        syncPrefsToUI();
     });
 
     document.getElementById('readonly-unlock-btn').addEventListener('click', () => {
@@ -1628,6 +1697,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Cloud sync: if a database is configured, its copy is the source of truth.
     await cloud.checkCloud();
     refreshCloudUI();
+    maybePromptForPasscode();
     if (cloud.isCloudEnabled() && prefs.autosync) {
         await pullFromCloud({ silent: true });
     }

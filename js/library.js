@@ -157,8 +157,10 @@ export function getFilteredLibrary(lib, cat, statusFilter, genreFilter, ratingFi
         );
     }
     
-    // Status filter
-    if (statusFilter && statusFilter !== 'all') {
+    // Status filter — "has-new" is the flag sync sets when a title gained content.
+    if (statusFilter === 'has-new') {
+        filtered = filtered.filter(m => Boolean(m.hasNew));
+    } else if (statusFilter && statusFilter !== 'all') {
         filtered = filtered.filter(m => m.status === statusFilter);
     }
 

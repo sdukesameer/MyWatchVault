@@ -120,6 +120,7 @@
             </select>
             <select id="status-filter" class="input-field" style="width: auto;">
                 <option value="all">All Statuses</option>
+                <option value="has-new">🆕 New Content Only</option>
                 <option value="watching">▶ Watching</option>
                 <option value="completed">✓ Completed</option>
                 <option value="plan-to-watch">⊕ Plan to Watch</option>
@@ -407,6 +408,10 @@
                     <input type="checkbox" id="opt-artwork" checked>
                 </label>
                 <label class="settings-row">
+                    <span>Ask for passcode when the app opens</span>
+                    <input type="checkbox" id="opt-ask-passcode" checked>
+                </label>
+                <label class="settings-row">
                     <span>Suggestions per batch</span>
                     <select id="opt-reco-batch" class="input-field input-compact" style="width:auto;">
                         <option value="5">5</option>
@@ -425,6 +430,32 @@
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" id="settings-cancel">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════ PASSCODE PROMPT (on load) ══════ -->
+<div id="passcode-modal" class="modal-overlay hidden">
+    <div class="modal-card narrow">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title">🔑 UNLOCK EDITING</div>
+                <div class="modal-subtitle">Enter the admin passcode, or keep browsing read-only.</div>
+            </div>
+            <button class="modal-close" id="passcode-close" title="Close (Esc)">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="password" id="passcode-input" class="input-field"
+                   placeholder="Admin passcode" autocomplete="current-password">
+            <div id="passcode-error" style="display:none;color:var(--danger);font-size:13px;margin-top:10px;"></div>
+            <label class="settings-row" style="margin-top:16px;">
+                <span>Ask every time I open the app</span>
+                <input type="checkbox" id="passcode-ask-again" checked>
+            </label>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="passcode-skip">Continue read-only</button>
+            <button class="btn btn-primary" id="passcode-submit">Unlock</button>
         </div>
     </div>
 </div>
