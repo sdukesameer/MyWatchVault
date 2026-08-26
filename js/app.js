@@ -5,10 +5,10 @@ import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations, enhanceRecommendation, updateRecommendationCard, applyRecoFilters, recoGenres } from './recommendations.js';
-import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback, kitsuAnime } from './api.js';
+import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback, kitsuAnime, resolveAnime } from './api.js';
 import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility, debounce } from './utils.js';
 import { setupSearch } from './search.js';
-import { getStats, getDashboardItems } from './dashboard.js';
+import { getStats, getDashboardItems, getAiringSchedule } from './dashboard.js';
 import * as cloud from './cloud.js';
 import { parseCSV, guessMapping, buildRows, toCSV, CSV_FIELDS, parseTitleList } from './csv.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, normalizeTags, isSeriesCategory } from './constants.js';
@@ -85,25 +85,19 @@ async function fetchDeepDetails(item) {
 
     try {
         if (item.category === 'anime-series' || item.category === 'anime') {
-            let jId = item.jikanId;
-            if (!jId) {
-                const sData = await jikanFetch(`/anime?q=${encodeURIComponent(item.title)}&limit=1`);
-                if (sData?.data?.[0]) jId = sData.data[0].mal_id;
+            const info = await resolveAnime(item);
+            if (info) {
+                if (info.anilistId) item.anilistId = info.anilistId;
+                if (info.jikanId) item.jikanId = info.jikanId;
+                if (info.runtime) item.runtime = info.runtime;
+                // Air date for the next episode powers the upcoming schedule.
+                item.nextEpisode = info.nextEpisode || null;
+                if (!item.poster && info.poster) item.poster = info.poster;
+                if (info.episodes) seasons = [{ number: 1, watched: 0, total: info.episodes }];
             }
 
-            if (jId) {
-                const data = await jikanFetch(`/anime/${jId}`);
-                if (data?.data) {
-                    let eps = parseInt(data.data.episodes) || 0;
-                    // Airing shows report no episode count; count the aired ones instead.
-                    if (!eps) eps = await resolveAnimeEpisodeCount(jId);
-                    seasons = [{ number: 1, watched: 0, total: eps }];
-                    item.jikanId = jId; // save it
-                }
-            }
-
-            // MAL search is frequently down, and it models long runners as one lump
-            // season. Fall back to TMDB, which knows the real season breakdown.
+            // Long runners are one lump season on MAL/AniList; TMDB knows the real
+            // breakdown, so prefer it when we still have nothing usable.
             if (!seasons.length || (seasons.length === 1 && !seasons[0].total)) {
                 const tmdbSeasons = await tmdbSeasonsFor(item);
                 if (tmdbSeasons.length) seasons = tmdbSeasons;
@@ -116,6 +110,16 @@ async function fetchDeepDetails(item) {
                 if (sData?.[0]?.show) tvId = sData[0].show.id;
             }
             if (tvId) {
+                // Runtime + next air date come from the show record itself.
+                const show = await fetchJSONRetry(`https://api.tvmaze.com/shows/${tvId}?embed=nextepisode`);
+                if (show) {
+                    if (show.averageRuntime) item.runtime = parseInt(show.averageRuntime) || 0;
+                    const ne = show._embedded?.nextepisode;
+                    item.nextEpisode = ne?.airstamp
+                        ? { number: ne.number, season: ne.season, name: ne.name,
+                            airingAt: Math.floor(new Date(ne.airstamp).getTime() / 1000) }
+                        : null;
+                }
                 const data = await fetchJSONRetry(`https://api.tvmaze.com/shows/${tvId}/seasons`);
                 if (Array.isArray(data)) {
                     seasons = data.filter(s => s.number > 0).map(s => ({
@@ -264,8 +268,9 @@ function render() {
     genreSelect.value = sortedGenres.includes(currentGenre) ? currentGenre : 'all';
     state.filterGenre = genreSelect.value;
     const { continueItem, upcoming } = getDashboardItems(state.library);
-
-    ui.renderDashboardWidgets(continueItem, upcoming, openDetail);
+    // Real air dates beat a static "coming soon" list whenever sync has found them.
+    const scheduled = getAiringSchedule(state.library);
+    ui.renderDashboardWidgets(continueItem, scheduled.length ? scheduled : upcoming, openDetail);
     
     const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy, state.libraryQuery);
     const isFiltered = Boolean(state.libraryQuery) || state.filterStatus !== 'all'
@@ -276,7 +281,8 @@ function render() {
             groupBy: state.groupBy,
             selectMode: state.selectMode,
             selectedIds: state.selectedIds,
-            onToggleSelect: toggleSelect
+            onToggleSelect: toggleSelect,
+            onQuickWatch: canEdit() ? quickWatch : null
         });
     updateBulkBar();
     
@@ -441,6 +447,9 @@ function guardEdit() {
 // Hides or disables the controls that mutate the vault while read-only.
 function applyEditPermissions() {
     const editable = canEdit();
+    // What the grid was last drawn under. The first render happens before the cloud
+    // status is known, so this starts out as "editable" and may need correcting.
+    const wasEditable = !document.body.classList.contains('read-only');
     document.body.classList.toggle('read-only', !editable);
 
     [
@@ -460,6 +469,11 @@ function applyEditPermissions() {
         if (el) el.disabled = !editable;
     });
     document.querySelectorAll('#seasons-grid .ep-input').forEach(el => { el.disabled = !editable; });
+
+    // Some controls are rendered rather than merely disabled (the per-card +1 EP
+    // button), so redraw the grid whenever the permission actually flips — on load,
+    // and on every lock/unlock.
+    if (wasEditable !== editable) render();
 }
 
 function refreshCloudUI() {
@@ -750,6 +764,51 @@ async function runCsvImport() {
     render();
     syncUp();
     showToast(`Imported ${added} title${added === 1 ? '' : 's'} ✓`, 'success');
+}
+
+// ── One-tap episode bump ────────────────────────────────────────
+// Advances the next unwatched season by a single episode and lets the existing status
+// rules decide whether the item is now watching or completed.
+function quickWatch(id) {
+    if (!guardEdit()) return;
+
+    const media = state.library.find(m => m.id === id);
+    if (!media) return;
+
+    const seasons = (media.seasons || []).map(s => ({ ...s }));
+    const target = ui.nextUnwatchedSeason({ ...media, seasons });
+    if (!target) { showToast('Everything tracked is already watched', 'info'); return; }
+
+    const season = seasons.find(s => s.number === target.number);
+    const total = parseInt(season.total) || 0;
+    season.watched = (parseInt(season.watched) || 0) + 1;
+    if (total > 0 && season.watched > total) season.watched = total;
+
+    const allDone = seasons.every(s => {
+        const t = parseInt(s.total) || 0;
+        return t > 0 ? (parseInt(s.watched) || 0) >= t : Boolean(s.completed);
+    });
+    const status = allDone ? 'completed'
+        : (media.status === 'on-hold' || media.status === 'dropped') ? media.status
+        : 'watching';
+
+    const updates = { seasons, status, updatedAt: new Date().toISOString() };
+    if (status === 'completed' && !media.completedAt) updates.completedAt = updates.updatedAt;
+
+    lib.updateMedia(state.library, id, updates);
+    render();
+    syncUp();
+
+    const label = season.number > 1 || seasons.length > 1
+        ? `S${season.number} · EP ${season.watched}${total ? '/' + total : ''}`
+        : `EP ${season.watched}${total ? '/' + total : ''}`;
+    showToast(allDone ? `"${media.title}" completed ✓` : `${media.title} — ${label}`, 'success', 'Undo', () => {
+        lib.updateMedia(state.library, id, {
+            seasons: media.seasons, status: media.status, completedAt: media.completedAt
+        });
+        render();
+        syncUp();
+    }, 5000);
 }
 
 // ── Passcode prompt on load ─────────────────────────────────────
@@ -1700,6 +1759,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     maybePromptForPasscode();
     if (cloud.isCloudEnabled() && prefs.autosync) {
         await pullFromCloud({ silent: true });
+    }
+
+    // Register the service worker so the app is installable and readable offline.
+    // Only over https/localhost — service workers are unavailable elsewhere.
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+        navigator.serviceWorker.register('./sw.js').catch(err =>
+            console.warn('Service worker registration failed:', err.message));
     }
 
     // Fill in any missing artwork quietly in the background.

@@ -72,7 +72,8 @@ function recordSuccess(host) { breakers.delete(host); }
 
 export function resetCircuitBreakers() { breakers.clear(); }
 
-export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600, headers, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
+export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600, headers,
+                                            timeoutMs = FETCH_TIMEOUT_MS, method, body } = {}) {
     const host = hostOf(url);
     // Host is known-bad right now: fail instantly instead of burning another timeout.
     if (breakerOpen(host)) return null;
@@ -89,7 +90,7 @@ export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600
             signal.addEventListener('abort', onOuterAbort, { once: true });
         }
         try {
-            const res = await fetch(url, { signal: controller.signal, headers });
+            const res = await fetch(url, { signal: controller.signal, headers, method, body });
             if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
             if (!res.ok) return null; // 404 and friends: retrying won't help
             const data = await res.json();
@@ -201,6 +202,144 @@ export async function callTMDB(proxyEndpoint, params, config, signal) {
 // ── Keyless metadata fallbacks ───────────────────────────────────
 // These need no API key, so they keep posters and episode counts working when MAL is
 // down or no TMDB key is configured.
+
+// AniList: keyless GraphQL, CORS-open, and the only free source that reports the exact
+// next-episode air time. Preferred over Jikan/MAL, which suffers regular outages.
+const ANILIST_URL = 'https://graphql.anilist.co';
+
+const ANILIST_FIELDS = `
+    id
+    title { romaji english }
+    format
+    status
+    episodes
+    duration
+    averageScore
+    genres
+    description(asHtml: false)
+    startDate { year }
+    coverImage { extraLarge large }
+    nextAiringEpisode { episode airingAt }`;
+
+function mapAniListMedia(m) {
+    if (!m) return null;
+    const score = parseInt(m.averageScore);
+    return {
+        anilistId: m.id,
+        title: m.title?.english || m.title?.romaji || '',
+        // MOVIE covers films; everything else (TV/OVA/ONA/SPECIAL) tracks as a series.
+        category: m.format === 'MOVIE' ? 'anime-movie' : 'anime-series',
+        episodes: parseInt(m.episodes) || 0,
+        runtime: parseInt(m.duration) || 0,
+        year: m.startDate?.year || null,
+        genre: (m.genres || []).join(', '),
+        description: String(m.description || '').replace(/<[^>]*>/g, '').slice(0, 300),
+        poster: m.coverImage?.extraLarge || m.coverImage?.large || null,
+        // AniList scores out of 100; keep the shared 10-point display format.
+        globalRating: isFinite(score) && score > 0 ? `${(score / 10).toFixed(1)} ★` : null,
+        isReleasing: m.status === 'RELEASING',
+        nextEpisode: m.nextAiringEpisode
+            ? { number: m.nextAiringEpisode.episode, airingAt: m.nextAiringEpisode.airingAt }
+            : null
+    };
+}
+
+async function anilistQuery(query, variables, opts = {}) {
+    const res = await fetchJSONRetry(ANILIST_URL, {
+        retries: 1,
+        ...opts,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ query, variables })
+    });
+    return res?.data || null;
+}
+
+export async function anilistSearch(title, opts = {}) {
+    const data = await anilistQuery(
+        `query ($s: String) { Media(search: $s, type: ANIME) {${ANILIST_FIELDS} } }`,
+        { s: title }, opts);
+    return mapAniListMedia(data?.Media);
+}
+
+export async function anilistById(id, opts = {}) {
+    const data = await anilistQuery(
+        `query ($id: Int) { Media(id: $id, type: ANIME) {${ANILIST_FIELDS} } }`,
+        { id: Number(id) }, opts);
+    return mapAniListMedia(data?.Media);
+}
+
+// Single entry point for anime metadata. AniList leads because it is the most reliable
+// of the free sources and the only one that knows air dates; Jikan and Kitsu remain as
+// fallbacks so an AniList outage isn't fatal either.
+export async function resolveAnime({ title, anilistId, jikanId }, opts = {}) {
+    let info = null;
+
+    try {
+        info = anilistId ? await anilistById(anilistId, opts) : await anilistSearch(title, opts);
+    } catch { /* fall through to the other sources */ }
+
+    if (info) {
+        // An airing show reports `episodes: null`; the next episode number tells us how
+        // many have aired without paging through the episode list.
+        if (!info.episodes && info.nextEpisode?.number > 1) {
+            info.episodes = info.nextEpisode.number - 1;
+        }
+        if (info.episodes) return info;
+    }
+
+    // AniList had no count (or no match) — try MAL, then Kitsu.
+    try {
+        let jId = jikanId;
+        if (!jId) {
+            const search = await jikanFetch(`/anime?q=${encodeURIComponent(title)}&limit=1`, { retries: 1, ...opts });
+            jId = search?.data?.[0]?.mal_id;
+        }
+        if (jId) {
+            const data = await jikanFetch(`/anime/${jId}`, { retries: 1, ...opts });
+            const a = data?.data;
+            if (a) {
+                let eps = parseInt(a.episodes) || 0;
+                if (!eps) eps = await resolveAnimeEpisodeCount(jId, opts);
+                const merged = info || {};
+                return {
+                    ...merged,
+                    jikanId: jId,
+                    title: merged.title || a.title_english || a.title,
+                    category: merged.category || (a.type === 'Movie' ? 'anime-movie' : 'anime-series'),
+                    episodes: eps || merged.episodes || 0,
+                    runtime: merged.runtime || parseInt(a.duration) || 0,
+                    year: merged.year || a.year || null,
+                    genre: merged.genre || (a.genres || []).map(g => g.name).join(', '),
+                    poster: merged.poster || a.images?.jpg?.large_image_url || null,
+                    globalRating: merged.globalRating || (a.score ? `${a.score} ★` : null)
+                };
+            }
+        }
+    } catch { /* fall through */ }
+
+    if (info) return info;
+
+    try {
+        const k = await kitsuAnime(title, opts);
+        if (k) {
+            return {
+                title: k.title,
+                category: k.isMovie ? 'anime-movie' : 'anime-series',
+                episodes: k.episodes || 0,
+                runtime: 0,
+                year: k.year,
+                genre: '',
+                description: k.description,
+                poster: k.poster,
+                globalRating: k.globalRating,
+                nextEpisode: null
+            };
+        }
+    } catch { /* nothing worked */ }
+
+    return null;
+}
 
 // Kitsu: anime database, no key required.
 export async function kitsuAnime(title, opts = {}) {

@@ -11,7 +11,7 @@ let lastLibraryHash = '';
 let cachedStats = null;
 
 function computeLibraryHash(library) {
-    return library.length + '-' + library.map(m => m.status + m.addedAt + m.hasNew + (m.seasons?.length||0) + m.rating + (m.globalRating||'') + (m.genre||'')).join('');
+    return library.length + '-' + library.map(m => m.status + m.addedAt + m.hasNew + (m.seasons?.length||0) + m.rating + (m.globalRating||'') + (m.genre||'') + (m.runtime||'') + (m.seasons||[]).map(s=>s.watched).join(':')).join('');
 }
 
 export function getStats(library) {
@@ -50,13 +50,15 @@ export function getStats(library) {
             });
         }
 
+        // Prefer the real runtime when we have it; fall back to genre averages otherwise.
+        const runtime = parseInt(m.runtime) || 0;
         if (m.category === 'movie' || m.category === 'anime-movie') {
-            if (m.status === 'completed') hours += 2; // avg 2 hours
+            if (m.status === 'completed') hours += (runtime || 120) / 60;
         } else {
             const watchedEps = m.seasons?.reduce((acc, s) => acc + (parseInt(s.watched) || 0), 0) || 0;
             eps += watchedEps;
-            if (m.category === 'anime-series') hours += watchedEps * 0.4; // 24m
-            else hours += watchedEps * 0.75; // 45m
+            const perEp = runtime || (m.category === 'anime-series' ? 24 : 45);
+            hours += watchedEps * (perEp / 60);
         }
     });
 
@@ -82,6 +84,36 @@ export function getStats(library) {
 }
 
 const recency = m => new Date(m.updatedAt || m.addedAt || 0);
+
+// ── Airing schedule ─────────────────────────────────────────────
+// Anything with a known next-episode air time, soonest first. Titles you've dropped
+// aren't upcoming, and an air time already past is stale data rather than a schedule.
+export function getAiringSchedule(library, { days = 14, limit = 8 } = {}) {
+    const now = Math.floor(Date.now() / 1000);
+    const horizon = now + days * 86400;
+
+    return library
+        .filter(m => m.status !== 'dropped')
+        .map(m => ({ media: m, airingAt: parseInt(m.nextEpisode?.airingAt) || 0 }))
+        .filter(e => e.airingAt > now && e.airingAt <= horizon)
+        .sort((a, b) => a.airingAt - b.airingAt)
+        .slice(0, limit)
+        .map(e => ({ ...e.media, airingAt: e.airingAt, nextEpisode: e.media.nextEpisode }));
+}
+
+// "Today" / "Tomorrow" / "Sat 14 Sep", plus the local air time.
+export function formatAirTime(airingAt) {
+    const d = new Date(airingAt * 1000);
+    const today = new Date();
+    const startOf = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const dayDiff = Math.round((startOf(d) - startOf(today)) / 86400000);
+
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (dayDiff === 0) return `Today · ${time}`;
+    if (dayDiff === 1) return `Tomorrow · ${time}`;
+    if (dayDiff < 7) return `${d.toLocaleDateString([], { weekday: 'long' })} · ${time}`;
+    return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} · ${time}`;
+}
 
 export function getDashboardItems(library) {
     const watching = library

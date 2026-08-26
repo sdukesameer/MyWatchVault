@@ -234,6 +234,32 @@
   50% { box-shadow: 0 0 16px var(--accent); }
 }
 
+.card-quick-watch {
+  position: absolute; bottom: 8px; right: 8px; z-index: 3;
+  background: rgba(0,0,0,0.72); backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.28); border-radius: 999px;
+  color: #fff; font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 700;
+  padding: 5px 10px; cursor: pointer; transition: var(--transition);
+  opacity: 0; /* revealed on hover, always visible on touch (see below) */
+}
+.media-card:hover .card-quick-watch,
+.card-quick-watch:focus-visible { opacity: 1; }
+.card-quick-watch:hover { background: var(--accent); border-color: var(--accent); }
+/* Touch devices have no hover, so keep it permanently visible there. */
+@media (hover: none) {
+  .card-quick-watch { opacity: 1; }
+}
+body.read-only .card-quick-watch { display: none; }
+
+/* Upcoming schedule */
+.upcoming-meta { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.upcoming-when { color: var(--accent3); font-weight: 600; }
+.upcoming-ep {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px;
+}
+
 .card-new-badge {
   position: absolute; bottom: 8px; left: 8px; right: 8px;
   background: linear-gradient(135deg, #e84393cc, #c0356dcc);

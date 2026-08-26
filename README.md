@@ -4,19 +4,39 @@ A polished, personal entertainment tracker with AI-powered sync and personalized
 
 ## Features
 - **Cinematic Dashboard**: A beautiful full-bleed interface that tracks your watch stats and seamlessly displays your "Continue Watching" items.
+- **One-Tap Progress**: A `+1 EP` button on every card advances the next unwatched season, auto-completes the title when you finish it, and offers an instant Undo.
+- **Airing Calendar**: "What's New & Upcoming" shows real air dates — *One Piece · Sunday 19:46 · EP 1176* — pulled from AniList and TVmaze, no API key needed.
+- **Installable (PWA)**: Add it to your phone's home screen; the app shell works offline.
 - **Media Library**: Track anime, series, and movies with customizable tagging and watch status.
 - **Personal Ratings**: Rate anything 1–5 stars. Ratings drive the sort, the rating filter, your average-rating stat, and the AI's taste profile. Click a star again to clear it.
 - **Season Tracking**: Granular tracking for watched episodes vs total episodes per season.
-- **Smart Deep Sync**: Automatically checks Jikan (Anime) and TMDB (Shows/Movies) for new seasons, episodes, or sequels, automatically updating your watch status.
+- **Smart Deep Sync**: Checks AniList (with Jikan/Kitsu as fallbacks), TVmaze and TMDB for new seasons, episodes, air dates and runtimes, flagging anything with new content.
 - **Auto-Metadata Population**: Manually adding an item by title instantly fetches the official poster, global rating, and synopsis in the background.
 - **AI Recommendations**: Get personalized recommendations based on what you have liked and completed.
 - **Bulk Import**: Paste a plain list of titles, one per line, and every detail — type, year, genre, poster, episode counts — is looked up automatically. Or load a CSV from MyAnimeList, Trakt, IMDb or Letterboxd and map the columns. CSV export too.
 - **Bulk Editing**: Select one, many, or all visible titles and change status or remove in one go.
 - **Grouping & Filtering**: Group your vault by status, type, genre or rating; filter by any of those plus a free-text search over titles, tags and genres.
 - **Light & Dark Mode**: Toggle in the navbar; your choice is remembered.
-- **Free Metadata Fallbacks**: Kitsu, iTunes and Wikipedia fill in artwork and details with no API key required, so posters still load when MyAnimeList is down.
+- **Free Metadata Fallbacks**: AniList, Kitsu, iTunes and Wikipedia fill in artwork, runtimes and air dates with no API key required, so the app keeps working when MyAnimeList is down.
 - **Optional Cloud Sync**: Share a read-only vault via Turso, gated behind an admin passcode for edits.
 - **Privacy-first / API Key Security**: No API keys are stored in localStorage or exposed to the frontend in production.
+
+## Tests
+
+```bash
+npm install       # once: playwright-core + serve
+npm test          # starts a server on a free port, runs the end-to-end suite
+npm test -- --only "season"    # run matching suites only
+npm test -- --headed          # watch it run in a real window
+npm test -- --live            # allow real API calls instead of stubs
+```
+
+The suite drives real Chrome and covers rendering and sort order, one-tap progress,
+season-number identity, the completion cascade, the unsaved-changes guard, keyboard
+shortcuts, filters/grouping/search, bulk actions, the airing schedule, runtime-based
+stats, read-only enforcement, the passcode prompt, corrupted-storage recovery, PWA
+installability, and responsive layout at three viewports. Metadata APIs are stubbed by
+default so runs are deterministic. Set `CHROME_PATH` if Chrome isn't in a standard place.
 
 ## Quick Start (Local Development)
 

@@ -1,7 +1,7 @@
 // js/sync.js
 // AI Sync Engine
 
-import { callTMDB, getLastProvider, callAI, extractJSON, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, mapWithLimit } from './api.js';
+import { callTMDB, getLastProvider, callAI, extractJSON, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, mapWithLimit, resolveAnime } from './api.js';
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS } from './constants.js';
 import { escapeHTML, showToast } from './utils.js';
 import { loadSyncMeta, normalizeTitle } from './library.js';
@@ -40,19 +40,21 @@ export async function runSync(library, config, onProgress) {
         try {
             if (media.category === 'movie' || media.category === 'anime-movie') {
                 result = { latestStatus: 'Released', isOngoing: false, upToDate: true };
-            } else if (media.jikanId) {
-                const res = await jikanFetch(`/anime/${media.jikanId}`, SYNC_FETCH);
-                if (res?.data) {
-                    let latestEpisodes = parseInt(res.data.episodes) || 0;
-                    // Airing shows report no count; fall back to counting aired episodes.
-                    if (!latestEpisodes) {
-                        latestEpisodes = await resolveAnimeEpisodeCount(media.jikanId);
-                    }
+            } else if (media.anilistId || media.jikanId || media.category.startsWith('anime')) {
+                const info = await resolveAnime(media, SYNC_FETCH);
+                if (info) {
+                    // Keep the ids and freshly-learned metadata for next time.
+                    if (info.anilistId) media.anilistId = info.anilistId;
+                    if (info.jikanId) media.jikanId = info.jikanId;
+                    if (info.runtime) media.runtime = info.runtime;
+                    media.nextEpisode = info.nextEpisode || null;
+
                     result = {
-                        latestStatus: res.data.status,
-                        latestEpisodes,
+                        latestStatus: info.isReleasing ? 'Currently Airing' : 'Finished Airing',
+                        latestEpisodes: info.episodes || 0,
                         latestSeason: 1,
-                        isOngoing: res.data.status === 'Currently Airing',
+                        isOngoing: Boolean(info.isReleasing),
+                        nextEpisode: info.nextEpisode || null,
                         upToDate: false
                     };
                     if (media.seasons.length > 0 && result.latestEpisodes) {
@@ -60,18 +62,25 @@ export async function runSync(library, config, onProgress) {
                     }
                     const totalWatched = watchedTotal(media.seasons);
                     if (result.latestEpisodes && totalWatched >= result.latestEpisodes) result.upToDate = true;
-                    if (res.data.status === 'Finished Airing' && totalWatched >= result.latestEpisodes) result.upToDate = true;
                 }
             } else if (media.tvmazeId) {
                 const [showRes, seasonsRes] = await Promise.all([
-                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}`, SYNC_FETCH),
+                    fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}?embed=nextepisode`, SYNC_FETCH),
                     fetchJSONRetry(`https://api.tvmaze.com/shows/${media.tvmazeId}/seasons`, SYNC_FETCH).then(r => r || [])
                 ]);
 
                 if (showRes && showRes.status) {
+                    if (showRes.averageRuntime) media.runtime = parseInt(showRes.averageRuntime) || media.runtime;
+                    const ne = showRes._embedded?.nextepisode;
+                    media.nextEpisode = ne?.airstamp
+                        ? { number: ne.number, season: ne.season, name: ne.name,
+                            airingAt: Math.floor(new Date(ne.airstamp).getTime() / 1000) }
+                        : null;
+
                     result = {
                         latestStatus: showRes.status,
                         isOngoing: showRes.status !== 'Ended',
+                        nextEpisode: media.nextEpisode,
                         upToDate: false
                     };
                     

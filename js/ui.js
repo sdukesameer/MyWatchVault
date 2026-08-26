@@ -4,6 +4,7 @@
 import { CAT_LABELS, CAT_EMOJI, STATUS_LABELS, STATUS_DOT_CLASS, isSeriesCategory, normalizeTags } from './constants.js';
 import { escapeHTML } from './utils.js';
 import { normalizeTitle } from './library.js';
+import { formatAirTime } from './dashboard.js';
 
 let editingId = null;
 
@@ -76,25 +77,38 @@ export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick)
         }
     }
 
-    // 2. Upcoming / New Releases
+    // 2. Upcoming — real air dates where we have them, otherwise new/planned content
     const upcomingWrap = document.getElementById('upcoming-list');
     if (upcomingWrap) {
         if (!upcomingItems || !upcomingItems.length) {
-            upcomingWrap.innerHTML = `<div class="upcoming-empty">No new releases available.</div>`;
+            upcomingWrap.innerHTML = `<div class="upcoming-empty">Nothing scheduled. Run a sync to check for new episodes.</div>`;
         } else {
             upcomingWrap.innerHTML = '';
             upcomingItems.forEach(item => {
-                const posterHTML = item.poster 
-                    ? `<img src="${item.poster}" class="upcoming-poster">` 
+                const posterHTML = item.poster
+                    ? `<img src="${escapeHTML(item.poster)}" class="upcoming-poster" alt="">`
                     : `<div class="upcoming-poster" style="display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--surface);border:1px solid var(--border)">${CAT_EMOJI[item.category]||'🎬'}</div>`;
-                
+
+                // A scheduled episode gets its air time; otherwise fall back to a label.
+                let meta;
+                if (item.airingAt) {
+                    const ep = item.nextEpisode || {};
+                    const epLabel = ep.season
+                        ? `S${ep.season}E${ep.number}`
+                        : (ep.number ? `EP ${ep.number}` : 'Next episode');
+                    meta = `<span class="upcoming-when">${escapeHTML(formatAirTime(item.airingAt))}</span>
+                            <span class="upcoming-ep">${escapeHTML(epLabel)}</span>`;
+                } else {
+                    meta = `<span class="upcoming-when">${item.hasNew ? 'New Content!' : 'Coming Soon'}</span>`;
+                }
+
                 const div = document.createElement('div');
                 div.className = 'upcoming-item';
                 div.innerHTML = `
                     ${posterHTML}
                     <div class="upcoming-info">
                         <div class="upcoming-title">${escapeHTML(item.title)}</div>
-                        <div class="upcoming-meta">${item.hasNew ? 'New Content!' : 'Coming Soon'}</div>
+                        <div class="upcoming-meta">${meta}</div>
                     </div>
                 `;
                 div.addEventListener('click', () => onCardClick(item.id));
@@ -144,8 +158,20 @@ function groupLibrary(items, groupBy) {
         .map(([label, groupItems]) => ({ label, items: groupItems }));
 }
 
+// The next unwatched season, or null when everything tracked is finished. Used by the
+// one-tap "+1 EP" control so it always advances the right season.
+export function nextUnwatchedSeason(media) {
+    const seasons = [...(media.seasons || [])].sort((a, b) => (a.number || 0) - (b.number || 0));
+    return seasons.find(s => {
+        const total = parseInt(s.total) || 0;
+        const watched = parseInt(s.watched) || 0;
+        return total === 0 ? !s.completed : watched < total;
+    }) || null;
+}
+
 export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, isFiltered = false,
-                           { groupBy = 'none', selectMode = false, selectedIds = new Set(), onToggleSelect } = {}) {
+                           { groupBy = 'none', selectMode = false, selectedIds = new Set(),
+                             onToggleSelect, onQuickWatch } = {}) {
     const grid = document.getElementById('media-grid');
 
     if (!filteredLib.length) {
@@ -203,6 +229,14 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, is
         const statusDotClass = hasNew ? 'new-available' : (STATUS_DOT_CLASS[media.status] || 'not-started');
         const newBadge = hasNew ? `<div class="card-new-badge">🆕 NEW CONTENT</div>` : '';
 
+        // One-tap episode bump — the most common action in a tracker, so it lives on
+        // the card rather than three clicks deep in the modal.
+        const pending = isSeriesCategory(media.category) ? nextUnwatchedSeason(media) : null;
+        const quickWatchHTML = (!selectMode && onQuickWatch && pending)
+            ? `<button class="card-quick-watch" title="Mark next episode watched"
+                       aria-label="Mark next episode of ${escapedTitle} watched">+1 EP</button>`
+            : '';
+
         const tagsHTML = media.tags?.length
             ? `<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">
                 ${media.tags.slice(0, 2).map(t => `<span style="font-size:9px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px;color:var(--text-dim)">#${escapeHTML(t)}</span>`).join('')}
@@ -221,6 +255,7 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, is
                     ? `<div class="card-select-box">${selectedIds.has(media.id) ? '✓' : ''}</div>`
                     : `<div class="card-badge ${media.category?.split('-')[0]}">${CAT_LABELS[media.category] || 'Unknown'}</div>`}
                 <div class="card-status-dot ${statusDotClass}" title="${STATUS_LABELS[media.status] || ''}"></div>
+                ${quickWatchHTML}
                 ${newBadge}
             </div>
             <div class="card-body">
@@ -234,6 +269,14 @@ export function renderGrid(filteredLib, syncResults, currentCat, onCardClick, is
                 ${progressHTML}
                 ${tagsHTML}
             </div>`;
+
+        const quickBtn = card.querySelector('.card-quick-watch');
+        if (quickBtn) {
+            quickBtn.addEventListener('click', (e) => {
+                e.stopPropagation();   // don't open the detail modal
+                onQuickWatch(media.id);
+            });
+        }
 
         // In select mode a click toggles selection instead of opening the item.
         const activate = () => (selectMode ? onToggleSelect?.(media.id) : onCardClick(media.id));

@@ -4,7 +4,14 @@
   "description": "Personal entertainment tracker with AI-powered sync & recommendations",
   "scripts": {
     "build-env": "node build-env.js",
-    "dev": "npx serve . -p 3000"
+    "dev": "npx serve . -p 3000",
+    "test": "node tests/run.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "test:headed": "node tests/run.mjs --headed"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "playwright-core": "^1.49.0",
+    "serve": "^14.2.4"
+  }
 }

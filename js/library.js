@@ -105,7 +105,13 @@ export function addMedia(lib, item) {
         tags: item.tags || [],
         jikanId: item.jikanId || null,
         tvmazeId: item.tvmazeId || null,
-        tmdbId: item.tmdbId || null
+        tmdbId: item.tmdbId || null,
+        anilistId: item.anilistId || null,
+        // Minutes per episode (or film length) — makes the watch-time stat real
+        // rather than an assumed 24/45/120.
+        runtime: item.runtime || null,
+        // { number, season?, name?, airingAt } for the upcoming schedule.
+        nextEpisode: item.nextEpisode || null
     };
     
     if ((media.category === 'series' || media.category === 'anime-series') && media.seasons.length === 0) {
