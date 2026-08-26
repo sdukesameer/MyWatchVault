@@ -3,7 +3,7 @@
 A polished, personal entertainment tracker with AI-powered sync and personalized recommendations. Track your anime, series, and movies, and let AI tell you when new seasons or sequels drop.
 
 ## Features
-- **Cinematic Dashboard**: A beautiful full-bleed interface that tracks your watch stats and seamlessly displays your "Continue Watching" items.
+- **Rotating Continue Watching**: The hero cycles through everything you're part-way through every 5 seconds, with dots to jump straight to one. Pauses on hover/focus and respects `prefers-reduced-motion`.
 - **One-Tap Progress**: A `+1 EP` button on every card advances the next unwatched season, auto-completes the title when you finish it, and offers an instant Undo.
 - **Airing Calendar**: "What's New & Upcoming" shows real air dates — *One Piece · Sunday 19:46 · EP 1176* — pulled from AniList and TVmaze, no API key needed.
 - **Installable (PWA)**: Add it to your phone's home screen; the app shell works offline.
@@ -18,6 +18,7 @@ A polished, personal entertainment tracker with AI-powered sync and personalized
 - **Grouping & Filtering**: Group your vault by status, type, genre or rating; filter by any of those plus a free-text search over titles, tags and genres.
 - **Light & Dark Mode**: Toggle in the navbar; your choice is remembered.
 - **Free Metadata Fallbacks**: AniList, Kitsu, iTunes and Wikipedia fill in artwork, runtimes and air dates with no API key required, so the app keeps working when MyAnimeList is down.
+- **Batched Artwork**: Missing posters are fetched in bulk — AniList's GraphQL resolves 25 titles per request, so a 20-title backfill costs **one** API call instead of 20–60. Everything else runs 6-way concurrent, and results are cached for 30 days.
 - **Optional Cloud Sync**: Share a read-only vault via Turso, gated behind an admin passcode for edits.
 - **Privacy-first / API Key Security**: No API keys are stored in localStorage or exposed to the frontend in production.
 

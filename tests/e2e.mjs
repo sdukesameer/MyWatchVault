@@ -373,6 +373,120 @@ const SUITES = {
         await page.close();
     },
 
+    'rotating continue watching': async (browser) => {
+        const page = await newPage(browser, { library: [
+            item({ id: 'w1', title: 'Watch One', status: 'watching', seasons: [{ number: 1, watched: 1, total: 10 }] }),
+            item({ id: 'w2', title: 'Watch Two', status: 'watching', seasons: [{ number: 1, watched: 2, total: 10 }] }),
+            item({ id: 'w3', title: 'Watch Three', status: 'watching', seasons: [{ number: 1, watched: 3, total: 10 }] }),
+            item({ id: 'w4', title: 'Not Watching', status: 'completed', seasons: [{ number: 1, watched: 10, total: 10 }] }),
+        ]});
+
+        const heroTitle = () => page.locator('#continue-hero .continue-hero-title').textContent();
+        eq('one dot per watching title (completed excluded)',
+            await page.locator('.continue-dot').count(), 3);
+
+        const first = (await heroTitle()).trim();
+        await page.waitForTimeout(5600);
+        const second = (await heroTitle()).trim();
+        check('rotates on its own', first !== second, `${first} → ${second}`);
+        eq('active dot follows the hero',
+            await page.locator('.continue-dot.active').getAttribute('data-index'), '1');
+
+        // Hovering must pause it, so it can't move mid-click.
+        await page.locator('#continue-hero').hover();
+        const paused = (await heroTitle()).trim();
+        await page.waitForTimeout(5600);
+        eq('pauses while hovered', (await heroTitle()).trim(), paused);
+
+        // Dots jump straight to a title.
+        await page.locator('.continue-dot[data-index="2"]').click();
+        await page.waitForTimeout(400);
+        eq('dot click selects that title', (await heroTitle()).trim(), 'Watch Three');
+
+        // Edit must open whatever is currently showing, not the original first item.
+        await page.locator('#dash-continue-btn').click();
+        await page.waitForTimeout(600);
+        eq('Edit opens the visible title',
+            (await page.locator('#detail-title').textContent()).trim(), 'Watch Three');
+        await closeDetail(page);
+
+        // Only one timer may ever be running, however many times we re-render.
+        await page.evaluate(() => {
+            document.getElementById('library-filter').value = '';
+            document.getElementById('library-filter').dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await page.waitForTimeout(600);
+        const before = (await heroTitle()).trim();
+        await page.waitForTimeout(5600);
+        const after = (await heroTitle()).trim();
+        const idxBefore = await page.locator('.continue-dot.active').getAttribute('data-index');
+        await page.waitForTimeout(5600);
+        const idxAfter = await page.locator('.continue-dot.active').getAttribute('data-index');
+        check('advances exactly one step per tick (no stacked timers)',
+            before !== after && ((parseInt(idxAfter) - parseInt(idxBefore) + 3) % 3) === 1,
+            `${idxBefore} → ${idxAfter}`);
+
+        check('no page errors', page.errors.length === 0, page.errors.join('; '));
+        await page.close();
+    },
+
+    'single continue item does not rotate': async (browser) => {
+        const page = await newPage(browser, { library: [
+            item({ id: 'only', title: 'Only One', status: 'watching' })] });
+        eq('no dots for a single title', await page.locator('.continue-dot').count(), 0);
+        const t = (await page.locator('#continue-hero .continue-hero-title').textContent()).trim();
+        await page.waitForTimeout(5600);
+        eq('stays put', (await page.locator('#continue-hero .continue-hero-title').textContent()).trim(), t);
+        check('no page errors', page.errors.length === 0, page.errors.join('; '));
+        await page.close();
+    },
+
+    'batched artwork backfill': async (browser) => {
+        // Count the requests: five anime must resolve in ONE AniList call.
+        let anilistCalls = 0, otherCalls = 0;
+        const browserPage = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+        browserPage.errors = [];
+        browserPage.on('pageerror', e => browserPage.errors.push(e.message));
+
+        await browserPage.route('**/graphql.anilist.co/**', route => {
+            anilistCalls++;
+            const body = JSON.parse(route.request().postData() || '{}');
+            // Answer every alias in the batched query with a poster.
+            const aliases = [...String(body.query || '').matchAll(/(a\d+):\s*Media/g)].map(m => m[1]);
+            const data = {};
+            aliases.forEach((a, i) => {
+                data[a] = { id: 100 + i, title: { english: `Anime ${i}`, romaji: null }, format: 'TV',
+                    status: 'FINISHED', episodes: 12, duration: 24, averageScore: 80, genres: ['Action'],
+                    description: '', startDate: { year: 2020 },
+                    coverImage: { extraLarge: `https://example.test/a${i}.jpg`, large: null },
+                    nextAiringEpisode: null };
+            });
+            return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+        });
+        for (const pattern of ['**/api.jikan.moe/**', '**/kitsu.io/**', '**/itunes.apple.com/**', '**/en.wikipedia.org/**']) {
+            await browserPage.route(pattern, route => { otherCalls++; return route.fulfill({ status: 404, body: '{}' }); });
+        }
+        await browserPage.route('**/.netlify/functions/**', route => route.fulfill({ status: 503, body: '{}' }));
+
+        const noArt = [1, 2, 3, 4, 5].map(n => item({
+            id: `n${n}`, title: `Anime Title ${n}`, category: 'anime-series', poster: null, posterTried: false }));
+        await browserPage.addInitScript(seed(noArt, { artwork: true }));
+        await browserPage.goto(BASE, { waitUntil: 'networkidle' });
+        await browserPage.waitForTimeout(4000);
+
+        const withPosters = await browserPage.evaluate(() =>
+            JSON.parse(localStorage.getItem('watchvault_library')).filter(m => m.poster).length);
+        eq('all five got artwork', withPosters, 5);
+        eq('five titles cost ONE AniList request', anilistCalls, 1);
+        eq('no per-title fallback requests needed', otherCalls, 0);
+
+        const enriched = await browserPage.evaluate(() =>
+            JSON.parse(localStorage.getItem('watchvault_library'))[0]);
+        check('batch also fills runtime', enriched.runtime === 24, String(enriched.runtime));
+        check('no page errors', browserPage.errors.length === 0, browserPage.errors.join('; '));
+        await browserPage.close();
+    },
+
     'airing schedule': async (browser) => {
         const soon = Math.floor(Date.now() / 1000) + 3600 * 30;   // ~tomorrow
         const later = Math.floor(Date.now() / 1000) + 3600 * 24 * 6;

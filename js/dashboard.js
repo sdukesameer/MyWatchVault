@@ -115,19 +115,26 @@ export function formatAirTime(airingAt) {
     return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} · ${time}`;
 }
 
+// How many titles the Continue Watching hero will rotate through.
+const CONTINUE_ROTATION_MAX = 10;
+
 export function getDashboardItems(library) {
     const watching = library
         .filter(m => m.status === 'watching')
         .sort((a, b) => recency(b) - recency(a));
 
-    let continueItem = watching[0] || null;
+    // Everything currently being watched, most recently touched first — the hero
+    // rotates through these.
+    let continueItems = watching.slice(0, CONTINUE_ROTATION_MAX);
+    let continueItem = continueItems[0] || null;
 
     if (!continueItem) {
         const planToWatch = library
             .filter(m => m.status === 'plan-to-watch')
             .sort((a, b) => recency(b) - recency(a));
         if (planToWatch.length > 0) {
-            continueItem = { ...planToWatch[0], isFallback: true };
+            continueItems = planToWatch.slice(0, CONTINUE_ROTATION_MAX).map(m => ({ ...m, isFallback: true }));
+            continueItem = continueItems[0];
         }
     }
 
@@ -137,5 +144,5 @@ export function getDashboardItems(library) {
         .sort((a, b) => (b.hasNew ? 1 : 0) - (a.hasNew ? 1 : 0) || recency(b) - recency(a))
         .slice(0, 3);
 
-    return { continueItem, upcoming };
+    return { continueItem, continueItems, upcoming };
 }

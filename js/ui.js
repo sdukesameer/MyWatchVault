@@ -27,53 +27,137 @@ export function renderStats(stats) {
     });
 }
 
-export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick) {
+// ── Continue Watching hero ──────────────────────────────────────
+// Rotates through everything you're part-way through. The timer is module-level and
+// always cleared before a re-render, otherwise every render would stack another one.
+const ROTATE_MS = 5000;
+let rotateTimer = null;
+let rotateIndex = 0;
+
+function stopRotation() {
+    if (rotateTimer) { clearInterval(rotateTimer); rotateTimer = null; }
+}
+
+function continueHeroHTML(media) {
+    let progressText = '';
+    let progressPercent = 0;
+
+    if (media.isFallback) {
+        progressText = 'Next up in your vault';
+        progressPercent = 0;
+    } else if (media.category === 'movie' || media.category === 'anime-movie') {
+        progressText = 'Watching';
+        progressPercent = 50;
+    } else {
+        const watched = media.seasons?.reduce((a, s) => a + (parseInt(s.watched) || 0), 0) || 0;
+        const total = media.seasons?.reduce((a, s) => a + (parseInt(s.total) || 0), 0) || 0;
+        progressText = total > 0 ? `Watched ${watched} / ${total} EP` : `Watched ${watched} EP`;
+        progressPercent = total > 0 ? Math.min(100, Math.max(5, (watched / total) * 100)) : 5;
+    }
+
+    const poster = media.poster
+        ? `<img class="continue-hero-bg" src="${escapeHTML(media.poster)}" alt="">`
+        : `<div class="continue-hero-bg continue-hero-fallback">${CAT_EMOJI[media.category] || '🎬'}</div>`;
+
+    return `
+        ${poster}
+        <div class="continue-hero-scrim"></div>
+        <div class="continue-hero-content">
+            <p class="continue-eyebrow">Continue Watching</p>
+            <h3 class="continue-hero-title">${escapeHTML(media.title)}</h3>
+            <div class="continue-hero-footer">
+                <div class="continue-hero-progress">
+                    <p class="continue-progress-text">${escapeHTML(progressText)}</p>
+                    <div class="continue-bar">
+                        <div class="continue-bar-fill" style="width:${progressPercent}%"></div>
+                    </div>
+                </div>
+                <button class="btn btn-primary continue-edit-btn" id="dash-continue-btn">Edit →</button>
+            </div>
+        </div>`;
+}
+
+export function renderDashboardWidgets(continueItem, upcomingItems, onCardClick, continueItems = null) {
+    stopRotation();
+
     // 1. Continue Watching
     const continueWrap = document.getElementById('continue-content');
     if (continueWrap) {
-        if (!continueItem) {
+        const items = (continueItems && continueItems.length) ? continueItems
+                    : (continueItem ? [continueItem] : []);
+
+        if (!items.length) {
             continueWrap.innerHTML = `<div class="continue-empty">Your vault is completely empty. Start tracking your favorites!</div>`;
         } else {
-            let progressText = '';
-            let progressPercent = 0;
-            
-            if (continueItem.isFallback) {
-                progressText = 'Next up in your vault';
-                progressPercent = 0;
-            } else if (continueItem.category === 'movie' || continueItem.category === 'anime-movie') {
-                progressText = 'Watching';
-                progressPercent = 50;
-            } else {
-                const totalWatched = continueItem.seasons?.reduce((acc, s) => acc + (parseInt(s.watched)||0), 0) || 0;
-                const totalEpisodes = continueItem.seasons?.reduce((acc, s) => acc + (parseInt(s.total)||0), 0) || 0;
-                progressText = totalEpisodes > 0 ? `Watched ${totalWatched} / ${totalEpisodes} EP` : `Watched ${totalWatched} EP`;
-                progressPercent = totalEpisodes > 0 ? Math.min(100, Math.max(5, (totalWatched / totalEpisodes) * 100)) : 5;
-            }
-            const posterHTML = continueItem.poster
-                ? `<img class="continue-hero-bg" src="${escapeHTML(continueItem.poster)}" alt="">`
-                : `<div class="continue-hero-bg continue-hero-fallback">${CAT_EMOJI[continueItem.category] || '🎬'}</div>`;
+            if (rotateIndex >= items.length) rotateIndex = 0;
+
+            const dots = items.length > 1
+                ? `<div class="continue-dots" role="tablist" aria-label="Continue watching">
+                     ${items.map((m, i) => `<button class="continue-dot${i === rotateIndex ? ' active' : ''}"
+                          data-index="${i}" role="tab" aria-selected="${i === rotateIndex}"
+                          aria-label="Show ${escapeHTML(m.title)}"></button>`).join('')}
+                   </div>`
+                : '';
 
             continueWrap.innerHTML = `
-                <div class="continue-hero">
-                    ${posterHTML}
-                    <div class="continue-hero-scrim"></div>
-                    <div class="continue-hero-content">
-                        <p class="continue-eyebrow">Continue Watching</p>
-                        <h3 class="continue-hero-title">${escapeHTML(continueItem.title)}</h3>
-                        <div class="continue-hero-footer">
-                            <div class="continue-hero-progress">
-                                <p class="continue-progress-text">${escapeHTML(progressText)}</p>
-                                <div class="continue-bar">
-                                    <div class="continue-bar-fill" style="width:${progressPercent}%"></div>
-                                </div>
-                            </div>
-                            <button class="btn btn-primary continue-edit-btn" id="dash-continue-btn">Edit →</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            const btn = document.getElementById('dash-continue-btn');
-            if (btn) btn.addEventListener('click', () => onCardClick(continueItem.id));
+                <div class="continue-hero" id="continue-hero">
+                    ${continueHeroHTML(items[rotateIndex])}
+                    ${dots}
+                </div>`;
+
+            const hero = document.getElementById('continue-hero');
+
+            const show = (index, { restart = false } = {}) => {
+                rotateIndex = ((index % items.length) + items.length) % items.length;
+                const media = items[rotateIndex];
+                // Swap only the hero contents so the dots survive the update.
+                const dotsEl = hero.querySelector('.continue-dots');
+                hero.innerHTML = continueHeroHTML(media);
+                if (dotsEl) {
+                    hero.appendChild(dotsEl);
+                    dotsEl.querySelectorAll('.continue-dot').forEach((d, i) => {
+                        d.classList.toggle('active', i === rotateIndex);
+                        d.setAttribute('aria-selected', String(i === rotateIndex));
+                    });
+                }
+                hero.classList.remove('is-swapping');
+                void hero.offsetWidth;              // restart the fade
+                hero.classList.add('is-swapping');
+
+                bindHero(media);
+                if (restart) startRotation();
+            };
+
+            const bindHero = (media) => {
+                const btn = hero.querySelector('#dash-continue-btn');
+                if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); onCardClick(media.id); });
+            };
+
+            function startRotation() {
+                stopRotation();
+                if (items.length < 2) return;
+                // Someone who asked for less motion shouldn't get a carousel.
+                if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+                rotateTimer = setInterval(() => show(rotateIndex + 1), ROTATE_MS);
+            }
+
+            bindHero(items[rotateIndex]);
+
+            if (items.length > 1) {
+                hero.querySelectorAll('.continue-dot').forEach(dot => {
+                    dot.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        show(parseInt(dot.dataset.index) || 0, { restart: true });
+                    });
+                });
+                // Pause while the pointer or keyboard focus is on the panel, so it can't
+                // slide out from under someone mid-click.
+                hero.addEventListener('mouseenter', stopRotation);
+                hero.addEventListener('mouseleave', startRotation);
+                hero.addEventListener('focusin', stopRotation);
+                hero.addEventListener('focusout', startRotation);
+                startRotation();
+            }
         }
     }
 

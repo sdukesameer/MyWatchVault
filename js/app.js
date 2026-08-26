@@ -5,7 +5,7 @@ import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations, enhanceRecommendation, updateRecommendationCard, applyRecoFilters, recoGenres } from './recommendations.js';
-import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback, kitsuAnime, resolveAnime } from './api.js';
+import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback, kitsuAnime, resolveAnime, anilistBatch, mapWithLimit, setCachedPoster } from './api.js';
 import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility, debounce } from './utils.js';
 import { setupSearch } from './search.js';
 import { getStats, getDashboardItems, getAiringSchedule } from './dashboard.js';
@@ -267,10 +267,10 @@ function render() {
         sortedGenres.map(g => `<option value="${escapeHTML(g)}">${escapeHTML(g)}</option>`).join('');
     genreSelect.value = sortedGenres.includes(currentGenre) ? currentGenre : 'all';
     state.filterGenre = genreSelect.value;
-    const { continueItem, upcoming } = getDashboardItems(state.library);
+    const { continueItem, continueItems, upcoming } = getDashboardItems(state.library);
     // Real air dates beat a static "coming soon" list whenever sync has found them.
     const scheduled = getAiringSchedule(state.library);
-    ui.renderDashboardWidgets(continueItem, scheduled.length ? scheduled : upcoming, openDetail);
+    ui.renderDashboardWidgets(continueItem, scheduled.length ? scheduled : upcoming, openDetail, continueItems);
     
     const filtered = lib.getFilteredLibrary(state.library, state.currentCat, state.filterStatus, state.filterGenre, state.filterRating, state.sortBy, state.libraryQuery);
     const isFiltered = Boolean(state.libraryQuery) || state.filterStatus !== 'all'
@@ -952,19 +952,64 @@ function bulkDelete() {
 // ── Poster backfill ─────────────────────────────────────────────
 // Older entries (and anything added while an upstream was down) can be missing artwork.
 // Fill those in from the keyless sources, a few per session so we never hammer them.
-const POSTER_BACKFILL_LIMIT = 8;
+// Artwork used to be fetched one title at a time, which meant a request per item (three
+// with fallbacks) and a long wait. Now anime resolve in batches of 25 through a single
+// AniList GraphQL call, and everything else runs concurrently.
+const POSTER_BACKFILL_LIMIT = 60;
+const POSTER_CONCURRENCY = 6;
+
 async function backfillPosters() {
-    const missing = state.library.filter(m => !m.poster && !m.posterTried).slice(0, POSTER_BACKFILL_LIMIT);
+    const missing = state.library
+        .filter(m => !m.poster && !m.posterTried)
+        .slice(0, POSTER_BACKFILL_LIMIT);
     if (!missing.length) return;
 
-    let found = 0;
-    for (const media of missing) {
-        const poster = await findPosterFallback(media).catch(() => null);
-        // Mark it either way so a title with no art isn't retried every session.
-        const updates = { posterTried: true };
-        if (poster) { updates.poster = poster; found++; }
-        lib.updateMedia(state.library, media.id, updates);
+    const resolved = new Map();   // media.id -> { poster, runtime?, nextEpisode? }
+
+    // 1. Anime: one request per 25 titles. Also picks up runtime and air dates for free.
+    const anime = missing.filter(m => String(m.category || '').startsWith('anime'));
+    if (anime.length) {
+        try {
+            const batch = await anilistBatch(anime.map(m => m.title));
+            anime.forEach(m => {
+                const hit = batch.get(m.title);
+                if (!hit) return;
+                const patch = {};
+                if (hit.poster) {
+                    patch.poster = hit.poster;
+                    // Share the result with the per-title cache so a later lookup for
+                    // the same name (a recommendation, say) costs nothing.
+                    setCachedPoster(m.title, m.category, hit.poster);
+                }
+                if (hit.runtime && !m.runtime) patch.runtime = hit.runtime;
+                if (hit.anilistId && !m.anilistId) patch.anilistId = hit.anilistId;
+                if (hit.nextEpisode && !m.nextEpisode) patch.nextEpisode = hit.nextEpisode;
+                if (Object.keys(patch).length) resolved.set(m.id, patch);
+            });
+        } catch (err) {
+            console.warn('Batched artwork lookup failed:', err.message);
+        }
     }
+
+    // 2. Everything else (and any anime the batch missed): in parallel, not one by one.
+    const rest = missing.filter(m => !resolved.has(m.id));
+    if (rest.length) {
+        const posters = await mapWithLimit(rest, POSTER_CONCURRENCY,
+            media => findPosterFallback(media).catch(() => null));
+        rest.forEach((media, i) => {
+            if (posters[i]) resolved.set(media.id, { poster: posters[i] });
+        });
+    }
+
+    // 3. One write pass. `posterTried` is set either way so a title with genuinely no
+    //    artwork isn't looked up again every session.
+    let found = 0;
+    missing.forEach(media => {
+        const patch = resolved.get(media.id) || {};
+        if (patch.poster) found++;
+        lib.updateMedia(state.library, media.id, { ...patch, posterTried: true });
+    });
+
     if (found) render();
 }
 

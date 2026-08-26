@@ -855,6 +855,30 @@ body.read-only #select-mode-btn { display: none; }
 }
 .continue-edit-btn { flex-shrink: 0; }
 
+/* Rotating hero: gentle cross-fade between titles */
+.continue-hero.is-swapping .continue-hero-bg,
+.continue-hero.is-swapping .continue-hero-content { animation: heroFade 0.45s ease; }
+@keyframes heroFade { from { opacity: 0; } to { opacity: inherit; } }
+@keyframes heroFadeContent { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.continue-hero.is-swapping .continue-hero-content { animation: heroFadeContent 0.45s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .continue-hero.is-swapping .continue-hero-bg,
+  .continue-hero.is-swapping .continue-hero-content { animation: none; }
+}
+
+.continue-dots {
+  position: absolute; top: 14px; right: 14px; z-index: 3;
+  display: flex; gap: 6px; padding: 5px 8px;
+  background: rgba(0,0,0,0.45); backdrop-filter: blur(8px); border-radius: 999px;
+}
+.continue-dot {
+  width: 7px; height: 7px; padding: 0; border-radius: 50%; cursor: pointer;
+  background: rgba(255,255,255,0.35); border: none; transition: var(--transition);
+}
+.continue-dot:hover { background: rgba(255,255,255,0.7); }
+.continue-dot.active { background: var(--accent); width: 18px; border-radius: 999px; }
+.continue-dot:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+
 /* On narrow screens the button gets its own row so it never crushes the progress bar. */
 @media (max-width: 560px) {
   .continue-hero { padding: 18px; min-height: 260px; }
