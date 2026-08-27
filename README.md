@@ -6,7 +6,7 @@ A polished, personal entertainment tracker with AI-powered sync and personalized
 - **Rotating Continue Watching**: The hero cycles through everything you're part-way through every 5 seconds, with dots to jump straight to one. Pauses on hover/focus and respects `prefers-reduced-motion`.
 - **One-Tap Progress**: A `+1 EP` button on every card advances the next unwatched season, auto-completes the title when you finish it, and offers an instant Undo.
 - **Airing Calendar**: "What's New & Upcoming" shows real air dates — *One Piece · Sunday 19:46 · EP 1176* — pulled from AniList and TVmaze, no API key needed.
-- **Installable (PWA)**: Add it to your phone's home screen; the app shell works offline.
+- **Installable (PWA)**: Add it to your phone's home screen; the app shell works offline. Code is served network-first, so a new deploy lands on the very next load rather than the one after.
 - **Media Library**: Track anime, series, and movies with customizable tagging and watch status.
 - **Personal Ratings**: Rate anything 1–5 stars. Ratings drive the sort, the rating filter, your average-rating stat, and the AI's taste profile. Click a star again to clear it.
 - **Season Tracking**: Granular tracking for watched episodes vs total episodes per season.
@@ -19,6 +19,7 @@ A polished, personal entertainment tracker with AI-powered sync and personalized
 - **Light & Dark Mode**: Toggle in the navbar; your choice is remembered.
 - **Free Metadata Fallbacks**: AniList, Kitsu, iTunes and Wikipedia fill in artwork, runtimes and air dates with no API key required, so the app keeps working when MyAnimeList is down.
 - **Batched Artwork**: Missing posters are fetched in bulk — AniList's GraphQL resolves 25 titles per request, so a 20-title backfill costs **one** API call instead of 20–60. Everything else runs 6-way concurrent, and results are cached for 30 days.
+- **Self-healing Artwork**: A lookup that fails because a source is *down* is never recorded as "this title has no artwork" — only a source that actually answered can say that. Anything still missing is retried after 7 days, and **Settings ⚙️ → Missing artwork → Fetch now** re-checks the whole vault immediately (it works on a read-only device too, since posters are never stored in the cloud).
 - **Optional Cloud Sync**: Share a read-only vault via Turso, gated behind an admin passcode for edits.
 - **Privacy-first / API Key Security**: No API keys are stored in localStorage or exposed to the frontend in production.
 
@@ -36,7 +37,9 @@ The suite drives real Chrome and covers rendering and sort order, one-tap progre
 season-number identity, the completion cascade, the unsaved-changes guard, keyboard
 shortcuts, filters/grouping/search, bulk actions, the airing schedule, runtime-based
 stats, read-only enforcement, the passcode prompt, corrupted-storage recovery, PWA
-installability, and responsive layout at three viewports. Metadata APIs are stubbed by
+installability (including that a deploy is served ahead of the cached copy while offline
+still falls back to it), artwork retry after an upstream outage, and responsive layout at
+three viewports. Metadata APIs are stubbed by
 default so runs are deterministic. Set `CHROME_PATH` if Chrome isn't in a standard place.
 
 ## Quick Start (Local Development)

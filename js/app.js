@@ -5,7 +5,7 @@ import * as lib from './library.js';
 import * as ui from './ui.js';
 import { runSync, renderSyncScreen } from './sync.js';
 import { fetchRecommendations, renderRecommendations, enhanceRecommendation, updateRecommendationCard, applyRecoFilters, recoGenres } from './recommendations.js';
-import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback, kitsuAnime, resolveAnime, anilistBatch, mapWithLimit, setCachedPoster } from './api.js';
+import { callAI, extractJSON, getLastProvider, callTMDB, jikanFetch, fetchJSONRetry, resolveAnimeEpisodeCount, fetchSimilarTitles, findPosterFallback, kitsuAnime, resolveAnime, anilistBatch, mapWithLimit, setCachedPoster, clearNegativePosterCache } from './api.js';
 import { escapeHTML, showToast, handleError, showLoading, hideLoading, setupModalAccessibility, debounce } from './utils.js';
 import { setupSearch } from './search.js';
 import { getStats, getDashboardItems, getAiringSchedule } from './dashboard.js';
@@ -418,6 +418,17 @@ function savePrefs() {
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch {}
 }
 
+// How many titles are still without a poster, so the recovery button says something
+// useful rather than leaving you guessing whether it did anything.
+function refreshArtworkRow() {
+    const label = document.getElementById('retry-artwork-label');
+    if (!label) return;
+    const n = state.library.filter(m => !m.poster).length;
+    label.textContent = n ? `Missing artwork (${n})` : 'Missing artwork (none)';
+    const btn = document.getElementById('retry-artwork');
+    if (btn) btn.disabled = !n;
+}
+
 function syncPrefsToUI() {
     const map = { 'opt-autosync': 'autosync', 'opt-daily-sync': 'dailySync',
                   'opt-artwork': 'artwork', 'opt-ask-passcode': 'askPasscode' };
@@ -429,6 +440,7 @@ function syncPrefsToUI() {
     if (askInPrompt) askInPrompt.checked = prefs.askPasscode !== false;
     const batch = document.getElementById('opt-reco-batch');
     if (batch) batch.value = String(prefs.recoBatch);
+    refreshArtworkRow();
 }
 
 // ── Cloud sync (Turso) ──────────────────────────────────────────
@@ -528,13 +540,13 @@ async function pullFromCloud({ silent = false } = {}) {
         }
 
         // Keep any artwork we already resolved locally — the cloud copy has none.
-        const localPosters = new Map(state.library.map(m => [m.id, { poster: m.poster, posterTried: m.posterTried }]));
+        const localPosters = new Map(state.library.map(m => [m.id, { poster: m.poster, posterTriedAt: m.posterTriedAt }]));
         state.library = data.library.map(m => ({ ...m, ...(localPosters.get(m.id) || {}) }));
 
         lib.saveLibrary(state.library);
         if (data.syncMeta) lib.saveSyncMeta(data.syncMeta);
         render();
-        backfillPosters();
+        if (prefs.artwork !== false) backfillPosters();
         if (!silent) showToast(`Pulled ${state.library.length} titles from cloud ✓`, 'success');
         return true;
     } catch (err) {
@@ -749,8 +761,13 @@ async function runCsvImport() {
                 const seasons = await fetchDeepDetails(enriched);
                 enriched.seasons = seasons;
                 if (!enriched.poster) {
-                    enriched.poster = await findPosterFallback(enriched).catch(() => null);
-                    enriched.posterTried = true;
+                    const report = {};
+                    enriched.poster = await findPosterFallback(enriched, { report }).catch(() => null);
+                    // Only record the attempt if a source actually answered; otherwise the
+                    // background backfill should pick this title up again later.
+                    if (enriched.poster || (report.reached && !report.unreachable)) {
+                        enriched.posterTriedAt = new Date().toISOString();
+                    }
                 }
             } catch { /* keep the plain row */ }
         }
@@ -957,20 +974,41 @@ function bulkDelete() {
 // AniList GraphQL call, and everything else runs concurrently.
 const POSTER_BACKFILL_LIMIT = 60;
 const POSTER_CONCURRENCY = 6;
+// A failed lookup used to set `posterTried: true` forever, so every title that happened to
+// be looked up while MyAnimeList was down was excluded from the backfill permanently. The
+// flag is now a timestamp that expires, and the legacy boolean is treated as "due for a
+// retry" so an existing vault heals itself on the next load.
+const POSTER_RETRY_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-async function backfillPosters() {
-    const missing = state.library
-        .filter(m => !m.poster && !m.posterTried)
-        .slice(0, POSTER_BACKFILL_LIMIT);
-    if (!missing.length) return;
+function needsArtwork(media, force = false) {
+    if (media.poster) return false;
+    if (force) return true;
+    if (!media.posterTriedAt) return true;            // never tried, or a legacy flag
+    const last = Date.parse(media.posterTriedAt);
+    if (!Number.isFinite(last)) return true;
+    return Date.now() - last > POSTER_RETRY_AFTER_MS;
+}
+
+// `skip` lets a caller that loops over several batches exclude the ids it has already
+// attempted. Without it a forced run would keep re-checking the same failing titles,
+// because `force` deliberately ignores the cooldown stamp those attempts wrote.
+async function backfillPosters({ force = false, skip = null } = {}) {
+    const due = state.library.filter(m => needsArtwork(m, force) && !skip?.has(m.id));
+    const missing = due.slice(0, POSTER_BACKFILL_LIMIT);
+    if (!missing.length) return { checked: 0, found: 0, remaining: 0, ids: [] };
 
     const resolved = new Map();   // media.id -> { poster, runtime?, nextEpisode? }
+    // Per title: did the sources it consulted actually answer? Only a title whose own
+    // lookups were reachable may be written off as "no artwork exists" — otherwise one
+    // upstream hiccup gets recorded as a permanent verdict.
+    const reachable = new Map();  // media.id -> boolean
 
     // 1. Anime: one request per 25 titles. Also picks up runtime and air dates for free.
     const anime = missing.filter(m => String(m.category || '').startsWith('anime'));
     if (anime.length) {
+        const report = {};
         try {
-            const batch = await anilistBatch(anime.map(m => m.title));
+            const batch = await anilistBatch(anime.map(m => m.title), { report });
             anime.forEach(m => {
                 const hit = batch.get(m.title);
                 if (!hit) return;
@@ -989,28 +1027,73 @@ async function backfillPosters() {
         } catch (err) {
             console.warn('Batched artwork lookup failed:', err.message);
         }
+        const batchOk = !!report.reached && !report.unreachable;
+        anime.forEach(m => reachable.set(m.id, batchOk));
     }
 
     // 2. Everything else (and any anime the batch missed): in parallel, not one by one.
     const rest = missing.filter(m => !resolved.has(m.id));
     if (rest.length) {
-        const posters = await mapWithLimit(rest, POSTER_CONCURRENCY,
-            media => findPosterFallback(media).catch(() => null));
+        const posters = await mapWithLimit(rest, POSTER_CONCURRENCY, async media => {
+            const report = {};
+            const poster = await findPosterFallback(media, { report }).catch(() => null);
+            reachable.set(media.id, !!report.reached && !report.unreachable);
+            return poster;
+        });
         rest.forEach((media, i) => {
             if (posters[i]) resolved.set(media.id, { poster: posters[i] });
         });
     }
 
-    // 3. One write pass. `posterTried` is set either way so a title with genuinely no
-    //    artwork isn't looked up again every session.
+    // 3. One write pass. The attempt is stamped so a title with genuinely no artwork isn't
+    //    looked up every session — but a title whose sources were unreachable is left
+    //    untouched so the next run retries it instead of writing it off.
     let found = 0;
+    const now = new Date().toISOString();
     missing.forEach(media => {
         const patch = resolved.get(media.id) || {};
         if (patch.poster) found++;
-        lib.updateMedia(state.library, media.id, { ...patch, posterTried: true });
+        if (!patch.poster && !reachable.get(media.id)) return;   // transient failure: retry later
+        lib.updateMedia(state.library, media.id, { ...patch, posterTriedAt: now });
     });
 
-    if (found) render();
+    if (found) { render(); refreshArtworkRow(); }
+    return { checked: missing.length, found, remaining: Math.max(0, due.length - missing.length),
+             ids: missing.map(m => m.id) };
+}
+
+// Manual escape hatch. Forgets every negative cache entry and re-checks the whole vault,
+// batch after batch, so a library that was written off during an upstream outage recovers
+// in one go rather than 60 titles per app load.
+const POSTER_RETRY_MAX_BATCHES = 12;
+
+async function handleRetryArtwork() {
+    const outstanding = state.library.filter(m => !m.poster).length;
+    if (!outstanding) { showToast('Every title already has artwork ✓', 'success'); return; }
+
+    clearNegativePosterCache();
+    const attempted = new Set();
+    let found = 0;
+    try {
+        for (let i = 0; i < POSTER_RETRY_MAX_BATCHES; i++) {
+            showLoading('Fetching artwork…',
+                `Checked ${attempted.size} of ${outstanding} title(s), found ${found}`);
+            const res = await backfillPosters({ force: true, skip: attempted });
+            if (!res.checked) break;
+            res.ids.forEach(id => attempted.add(id));
+            found += res.found;
+            if (!res.remaining) break;
+        }
+    } finally {
+        hideLoading();
+    }
+    const checked = attempted.size;
+
+    lib.saveLibrary(state.library);
+    render();
+    refreshArtworkRow();
+    if (found) showToast(`Found artwork for ${found} title(s) ✓`, 'success');
+    else showToast(`No artwork found for ${checked} title(s) — the sources may be down, try again later`, 'error');
 }
 
 // ── Sync Handler ────────────────────────────────────────────────
@@ -1137,7 +1220,7 @@ function bindEvents() {
     });
     document.getElementById('refresh-reco-btn').addEventListener('click', () => handleFetchRecos(false));
     document.getElementById('load-more-reco-btn').addEventListener('click', () => handleFetchRecos(true));
-    document.getElementById('settings-btn').addEventListener('click', () => { ui.openModal('settings-modal'); refreshCloudUI(); });
+    document.getElementById('settings-btn').addEventListener('click', () => { ui.openModal('settings-modal'); refreshCloudUI(); refreshArtworkRow(); });
     
     // Back buttons
     document.querySelectorAll('.back-to-lib').forEach(btn => {
@@ -1587,6 +1670,7 @@ function bindEvents() {
             savePrefs();
         });
     });
+    document.getElementById('retry-artwork')?.addEventListener('click', handleRetryArtwork);
     document.getElementById('opt-reco-batch').addEventListener('change', (e) => {
         prefs.recoBatch = parseInt(e.target.value) || 10;
         savePrefs();

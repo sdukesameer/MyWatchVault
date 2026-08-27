@@ -72,11 +72,19 @@ function recordSuccess(host) { breakers.delete(host); }
 
 export function resetCircuitBreakers() { breakers.clear(); }
 
+// `report` (optional) is annotated with what actually happened at the transport level.
+// Without it a caller cannot tell "the source answered, this title has no artwork" from
+// "the source was unreachable" — both arrive as null, and treating the second as the first
+// is what let one outage permanently blacklist a title.
 export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600, headers,
-                                            timeoutMs = FETCH_TIMEOUT_MS, method, body } = {}) {
+                                            timeoutMs = FETCH_TIMEOUT_MS, method, body,
+                                            report } = {}) {
     const host = hostOf(url);
     // Host is known-bad right now: fail instantly instead of burning another timeout.
-    if (breakerOpen(host)) return null;
+    if (breakerOpen(host)) {
+        if (report) report.unreachable = true;
+        return null;
+    }
 
     let delay = baseDelay;
     for (let attempt = 0; ; attempt++) {
@@ -92,13 +100,17 @@ export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600
         try {
             const res = await fetch(url, { signal: controller.signal, headers, method, body });
             if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
-            if (!res.ok) return null; // 404 and friends: retrying won't help
+            if (!res.ok) {            // 404 and friends: retrying won't help
+                if (report) report.reached = true;   // it answered, so the answer counts
+                return null;
+            }
             const data = await res.json();
             // Jikan answers with a 200-shaped body carrying an error status in some cases.
             if (data && typeof data.status === 'number' && data.status >= 400) {
                 throw new Error(`upstream ${data.status}`);
             }
             recordSuccess(host);
+            if (report) report.reached = true;
             return data;
         } catch (err) {
             // Our own deadline fired: treat it as a retryable failure, not a real abort.
@@ -106,6 +118,7 @@ export async function fetchJSONRetry(url, { retries = 2, signal, baseDelay = 600
             if (err.name === 'AbortError' && signal?.aborted) throw err;
             if (attempt >= retries) {
                 recordFailure(host);
+                if (report) report.unreachable = true;
                 console.warn(`[fetch] gave up on ${url}: ${timedOut ? `timed out after ${timeoutMs}ms` : err.message}`);
                 return null;
             }
@@ -414,6 +427,10 @@ export async function wikipediaSummary(title, opts = {}) {
 // stored in the cloud DB), so remember the resolved URL per title.
 const POSTER_CACHE_KEY = 'watchvault_poster_cache';
 const POSTER_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+// A "no artwork anywhere" answer is far less trustworthy than a URL: the upstreams add
+// entries all the time, and a lookup that ran during an outage used to lock the title out
+// for a month. Negative entries therefore expire in days, not weeks.
+const POSTER_NEGATIVE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
 let posterCache = null;
 
 function posterCacheKey(title, category) {
@@ -428,7 +445,9 @@ function loadPosterCache() {
         const now = Date.now();
         if (Array.isArray(raw)) {
             raw.forEach(([k, entry]) => {
-                if (entry && now - entry.t < POSTER_CACHE_TTL) posterCache.set(k, entry);
+                if (!entry) return;
+                const ttl = entry.url ? POSTER_CACHE_TTL : POSTER_NEGATIVE_TTL;
+                if (now - entry.t < ttl) posterCache.set(k, entry);
             });
         }
     } catch { /* ignore a corrupt cache */ }
@@ -460,9 +479,15 @@ export async function findPosterFallback({ title, category }, opts = {}) {
     const cached = getCachedPoster(title, category);
     if (cached !== undefined) return cached;
 
-    const url = await resolvePosterFallback({ title, category }, opts);
-    setCachedPoster(title, category, url);
-    return url;
+    // Share the caller's report when there is one, so a whole backfill run can see whether
+    // any source was up; otherwise keep a private one just for the caching decision.
+    const report = opts.report || {};
+    const url = await resolvePosterFallback({ title, category }, { ...opts, report });
+    if (url) { setCachedPoster(title, category, url); return url; }
+    // Nothing found. Only remember that if the sources were actually reachable.
+    if (report.unreachable) return null;
+    setCachedPoster(title, category, null);
+    return null;
 }
 
 async function resolvePosterFallback({ title, category }, opts = {}) {
@@ -478,8 +503,21 @@ async function resolvePosterFallback({ title, category }, opts = {}) {
         return wiki?.poster || null;
     } catch (err) {
         if (err?.name === 'AbortError') throw err;
+        if (opts.report) opts.report.unreachable = true;
         return null;
     }
+}
+
+// Forget every "none found" entry so a retry actually hits the network again. Successful
+// URLs are kept, so a manual retry stays cheap.
+export function clearNegativePosterCache() {
+    const cache = loadPosterCache();
+    let dropped = 0;
+    [...cache.entries()].forEach(([k, entry]) => {
+        if (!entry?.url) { cache.delete(k); dropped++; }
+    });
+    if (dropped) savePosterCache();
+    return dropped;
 }
 
 // ── Similar titles ───────────────────────────────────────────────

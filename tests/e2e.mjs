@@ -487,6 +487,87 @@ const SUITES = {
         await browserPage.close();
     },
 
+    'artwork retry after failure': async (browser) => {
+        // A lookup that failed once used to set `posterTried: true` forever, so every title
+        // looked up during an upstream outage was excluded from the backfill permanently.
+        const ago = ms => new Date(Date.now() - ms).toISOString();
+        const DAY = 24 * 60 * 60 * 1000;
+
+        async function run(label, over, { offline = false, click = false } = {}) {
+            let anilistCalls = 0;
+            const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+            page.errors = [];
+            page.on('pageerror', e => page.errors.push(e.message));
+
+            await page.route('**/graphql.anilist.co/**', route => {
+                if (offline) return route.abort();
+                anilistCalls++;
+                const body = JSON.parse(route.request().postData() || '{}');
+                const data = {};
+                [...String(body.query || '').matchAll(/(a\d+):\s*Media/g)].forEach(([, a], i) => {
+                    data[a] = { id: 300 + i, title: { english: `Retry ${i}`, romaji: null }, format: 'TV',
+                        status: 'FINISHED', episodes: 12, duration: 24, averageScore: 70, genres: ['Action'],
+                        description: '', startDate: { year: 2021 },
+                        coverImage: { extraLarge: `https://example.test/r${i}.jpg`, large: null },
+                        nextAiringEpisode: null };
+                });
+                return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+            });
+            for (const pattern of ['**/api.jikan.moe/**', '**/kitsu.io/**', '**/itunes.apple.com/**', '**/en.wikipedia.org/**']) {
+                await page.route(pattern, route => offline ? route.abort() : route.fulfill({ status: 404, body: '{}' }));
+            }
+            await page.route('**/.netlify/functions/**', route => route.fulfill({ status: 503, body: '{}' }));
+
+            const library = [1, 2, 3].map(n => item({
+                id: `t${n}`, title: `Retry Title ${n}`, category: 'anime-series', poster: null, ...over }));
+            delete library[0].posterTried;   // `item()` sets the legacy flag by default
+            await page.addInitScript(seed(library, { artwork: true }));
+            await page.goto(BASE, { waitUntil: 'networkidle' });
+            await page.waitForTimeout(3500);
+
+            if (click) {
+                await page.locator('#settings-btn').click();
+                await page.locator('#retry-artwork').click();
+                await page.waitForTimeout(4000);
+            }
+
+            const out = await page.evaluate(() => {
+                const lib = JSON.parse(localStorage.getItem('watchvault_library'));
+                const cache = JSON.parse(localStorage.getItem('watchvault_poster_cache') || '[]');
+                return {
+                    posters: lib.filter(m => m.poster).length,
+                    stamped: lib.filter(m => m.posterTriedAt).length,
+                    negatives: cache.filter(([, e]) => !e.url).length,
+                };
+            });
+            check(`${label}: no page errors`, page.errors.length === 0, page.errors.join('; '));
+            await page.close();
+            return { ...out, anilistCalls };
+        }
+
+        // The reported bug: a legacy tombstone from an earlier failed session.
+        let r = await run('legacy flag', { posterTried: true });
+        eq('legacy posterTried is retried, not skipped forever', r.posters, 3);
+        eq('legacy retry costs one batched call', r.anilistCalls, 1);
+
+        // A recent attempt must not be repeated on every app load.
+        r = await run('inside cooldown', { posterTriedAt: ago(DAY) });
+        eq('a recent attempt is not repeated', r.anilistCalls, 0);
+
+        // ...but it must not be permanent either.
+        r = await run('cooldown expired', { posterTriedAt: ago(30 * DAY) });
+        eq('an old attempt is retried once the cooldown lapses', r.posters, 3);
+
+        // An outage is not a verdict: nothing may be written off.
+        r = await run('sources down', { posterTriedAt: null }, { offline: true });
+        eq('an outage stamps nothing', r.stamped, 0);
+        eq('an outage caches no "no artwork" verdict', r.negatives, 0);
+
+        // Manual recovery ignores the cooldown entirely.
+        r = await run('manual retry', { posterTriedAt: ago(60 * 1000) }, { click: true });
+        eq('Fetch now recovers titles inside the cooldown', r.posters, 3);
+    },
+
     'airing schedule': async (browser) => {
         const soon = Math.floor(Date.now() / 1000) + 3600 * 30;   // ~tomorrow
         const later = Math.floor(Date.now() / 1000) + 3600 * 24 * 6;
@@ -544,6 +625,12 @@ const SUITES = {
         // Unlock, then confirm edits write through.
         await page.locator('#settings-btn').click();
         await page.waitForTimeout(400);
+        // Artwork is never stored in the cloud, so fetching it is not an "edit" — the
+        // recovery button must stay usable on a read-only device (a phone, typically).
+        const retry = page.locator('#retry-artwork');
+        check('Fetch missing artwork stays available while locked',
+            await retry.isVisible() && !(await retry.isDisabled()));
+
         await page.fill('#cloud-passcode', PASSCODE);
         await page.locator('#cloud-login-btn').click();
         await page.waitForTimeout(1500);
@@ -559,7 +646,7 @@ const SUITES = {
         check('edit pushed to the cloud',
             cloud.saves.length > 0 && cloud.saves.at(-1).some(m => m.notes === 'synced note'));
         check('artwork stripped from the cloud payload',
-            cloud.saves.at(-1).every(m => !('poster' in m) && !('posterTried' in m)));
+            cloud.saves.at(-1).every(m => !('poster' in m) && !('posterTried' in m) && !('posterTriedAt' in m)));
         check('no page errors', page.errors.length === 0, page.errors.join('; '));
         await page.close();
     },
@@ -630,6 +717,38 @@ const SUITES = {
         check('apple-touch-icon declared', await page.locator('link[rel="apple-touch-icon"]').count() > 0);
         const sw = await page.evaluate(() => navigator.serviceWorker?.getRegistration().then(r => Boolean(r)));
         check('service worker registered', sw === true);
+
+        // The shell's JS must be network-first. Under stale-while-revalidate a deploy did
+        // not take effect until the *second* visit, which looks exactly like "the fix isn't
+        // on my phone". Poison the cache and see which copy the SW hands back.
+        const cacheName = await page.evaluate(async () => (await caches.keys())[0]);
+        check('SW cache version present', Boolean(cacheName), String(cacheName));
+        if (cacheName) {
+            await page.evaluate(async (name) => {
+                await navigator.serviceWorker.ready;
+                const c = await caches.open(name);
+                await c.put('./js/app.js', new Response('/* STALE COPY */',
+                    { status: 200, headers: { 'Content-Type': 'application/javascript' } }));
+            }, cacheName);
+
+            const fresh = await page.evaluate(async () =>
+                (await (await fetch('./js/app.js')).text()).includes('STALE COPY'));
+            check('a new deploy of app.js is served immediately, not the cached copy', fresh === false);
+
+            // ...but the cached copy is still the offline fallback. Re-poison first: the
+            // successful fetch above already refreshed the entry with the real file.
+            await page.context().setOffline(true);
+            const offline = await page.evaluate(async (name) => {
+                const c = await caches.open(name);
+                await c.put('./js/app.js', new Response('/* STALE COPY */',
+                    { status: 200, headers: { 'Content-Type': 'application/javascript' } }));
+                try { return (await (await fetch('./js/app.js')).text()).includes('STALE COPY'); }
+                catch (e) { return `threw: ${e.message}`; }
+            }, cacheName);
+            check('offline falls back to the cached copy', offline === true, String(offline));
+            await page.context().setOffline(false);
+        }
+
         check('no page errors', page.errors.length === 0, page.errors.join('; '));
         await page.close();
     },

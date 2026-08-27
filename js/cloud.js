@@ -63,7 +63,7 @@ export async function pull() {
 // Artwork is deliberately left out of the database — it is re-fetched locally from the
 // keyless poster sources, so the rows stay small and hold only the text you typed.
 function stripArtwork(library) {
-    return library.map(({ poster, posterTried, ...rest }) => rest);
+    return library.map(({ poster, posterTried, posterTriedAt, ...rest }) => rest);
 }
 
 export async function push(library, syncMeta = {}) {
